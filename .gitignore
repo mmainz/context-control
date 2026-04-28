@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build and test output
+dist/
+coverage/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Pi local/project state
+.pi/
+
+# OS/editor files
+.DS_Store
+*.swp
