@@ -16,3 +16,4 @@ coverage/
 # OS/editor files
 .DS_Store
 *.swp
+.fallow

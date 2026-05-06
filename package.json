@@ -15,7 +15,17 @@
   "main": "./index.ts",
   "types": "./index.ts",
   "files": [
+    "config.ts",
+    "filtering.ts",
     "index.ts",
+    "repo-id.ts",
+    "report.ts",
+    "resource-id.ts",
+    "resources.ts",
+    "runtime.ts",
+    "system-prompt.ts",
+    "types.ts",
+    "ui.ts",
     "README.md",
     "LICENSE"
   ],
@@ -27,11 +37,13 @@
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
     "@types/node": "^24.10.1",
     "eslint": "^9.39.1",
     "prettier": "^3.6.2",
