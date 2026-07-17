@@ -2,12 +2,13 @@ import { basename, dirname } from "node:path";
 
 import {
   loadProjectContextFiles,
+  loadSkills,
   type BuildSystemPromptOptions,
   type ExtensionAPI,
   type ExtensionContext,
   type Skill,
   type SlashCommandInfo,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { getAgentDir } from "./config";
 import { createResourceRef } from "./resource-id";
@@ -25,8 +26,8 @@ function contextFileGroup(
 }
 
 function skillGroup(command: SlashCommandInfo): string {
-  const { scope, source } = command.sourceInfo;
-  return source === "top-level" ? scope : `${scope}:${source}`;
+  const { origin, scope, source } = command.sourceInfo;
+  return origin === "top-level" ? scope : `${scope}:${source}`;
 }
 
 function skillLabel(command: SlashCommandInfo): string {
@@ -34,6 +35,9 @@ function skillLabel(command: SlashCommandInfo): string {
 }
 
 export function isProjectResource(item: ResourceItem): boolean {
+  if (item.scope === "project") return true;
+  if (item.scope === "user") return false;
+
   return (
     item.ref.id.startsWith("repo:") ||
     item.ref.group === "project" ||
@@ -49,10 +53,11 @@ async function createContextFileItems(
   return Promise.all(
     contextFiles.map(async (file) => {
       const initialRef = await createResourceRef(file.path, repository);
-      const ref = await createResourceRef(file.path, repository, {
+      const ref = {
+        ...initialRef,
         label: basename(file.path),
         group: contextFileGroup(initialRef.id, initialRef.path, agentDir),
-      });
+      };
 
       return { ref, sourcePath: file.path };
     }),
@@ -73,20 +78,25 @@ export async function contextFilesFromOptions(
 export async function skillsFromOptions(
   options: BuildSystemPromptOptions,
   repository: RepositoryIdentity,
+  settings: { includeExplicitOnly?: boolean } = {},
 ): Promise<ResourceItem[]> {
-  const skills = options.skills ?? [];
+  const skills = (options.skills ?? []).filter(
+    (skill) => settings.includeExplicitOnly || !skill.disableModelInvocation,
+  );
 
   return Promise.all(
     skills.map(async (skill) => ({
       ref: await createResourceRef(skill.filePath, repository, {
         label: skill.name,
         group:
-          skill.sourceInfo.source === "top-level"
+          skill.sourceInfo.origin === "top-level"
             ? skill.sourceInfo.scope
             : `${skill.sourceInfo.scope}:${skill.sourceInfo.source}`,
       }),
       sourcePath: skill.filePath,
       description: skill.description,
+      scope: skill.sourceInfo.scope,
+      explicitOnly: skill.disableModelInvocation,
     })),
   );
 }
@@ -114,10 +124,21 @@ export async function discoverSkills(
   const commands = pi
     .getCommands()
     .filter((command) => command.source === "skill");
+  const hiddenSkillPaths = new Set(
+    loadSkills({
+      cwd: repository.worktreeRoot ?? repository.label,
+      agentDir: getAgentDir(),
+      skillPaths: commands.map((command) => command.sourceInfo.path),
+      includeDefaults: false,
+    })
+      .skills.filter((skill) => skill.disableModelInvocation)
+      .map((skill) => skill.filePath),
+  );
   const seen = new Set<string>();
   const resources: ResourceItem[] = [];
 
   for (const command of commands) {
+    if (hiddenSkillPaths.has(command.sourceInfo.path)) continue;
     if (seen.has(command.sourceInfo.path)) continue;
     seen.add(command.sourceInfo.path);
 
@@ -152,5 +173,7 @@ export function pickSkills(
   if (!skills) return [];
 
   const keptPaths = new Set(kept.map((item) => item.sourcePath));
-  return skills.filter((skill) => keptPaths.has(skill.filePath));
+  return skills.filter(
+    (skill) => skill.disableModelInvocation || keptPaths.has(skill.filePath),
+  );
 }

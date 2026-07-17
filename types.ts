@@ -40,6 +40,8 @@ export interface ResourceItem {
   ref: ResourceRef;
   sourcePath: string;
   description?: string;
+  scope?: "user" | "project" | "temporary";
+  explicitOnly?: boolean;
 }
 
 export type ResourceKind = "contextFiles" | "skills";

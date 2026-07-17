@@ -5,13 +5,13 @@ import {
   matchesKey,
   truncateToWidth,
   wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 import type {
-  ExtensionAPI,
+  BuildSystemPromptOptions,
   ExtensionCommandContext,
   Theme,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import {
   createPolicy,
@@ -21,7 +21,11 @@ import {
   pruneStaleRefs,
   staleRefs,
 } from "./filtering";
-import { discoverContextFiles, discoverSkills } from "./resources";
+import {
+  contextFilesFromOptions,
+  isProjectResource,
+  skillsFromOptions,
+} from "./resources";
 import { saveConfig } from "./config";
 import { makeContextControlReport, renderContextControlReport } from "./report";
 import type {
@@ -583,14 +587,21 @@ function updateRepositoryMetadata(
 }
 
 export async function runContextControlCommand(
-  pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   runtime: RuntimeConfig,
+  options: BuildSystemPromptOptions,
+  showUsage: (full: boolean) => Promise<void>,
 ): Promise<void> {
   updateRepositoryMetadata(runtime.config, runtime);
 
-  const loadContextFiles = () => discoverContextFiles(ctx, runtime.repository);
-  const loadSkills = () => discoverSkills(pi, runtime.repository);
+  const contextFiles = (
+    await contextFilesFromOptions(options, runtime.repository)
+  ).filter(isProjectResource);
+  const skills = (await skillsFromOptions(options, runtime.repository)).filter(
+    isProjectResource,
+  );
+  const loadContextFiles = () => Promise.resolve(contextFiles);
+  const loadSkills = () => Promise.resolve(skills);
 
   while (true) {
     const contextFiles = await loadContextFiles();
@@ -613,6 +624,12 @@ export async function runContextControlCommand(
             label: "Configure project context files...",
           },
           { id: "configure_skills", label: "Configure project skills..." },
+          {
+            id: "context_usage",
+            label: "Context usage...",
+            description:
+              "Inspect the effective policy-filtered context window and token estimates.",
+          },
           {
             id: "clean_stale",
             label: "Clean stale entries",
@@ -666,6 +683,11 @@ export async function runContextControlCommand(
 
     if (choice === "configure_skills") {
       await configureResourceKind(ctx, runtime, "skills", loadSkills);
+      continue;
+    }
+
+    if (choice === "context_usage") {
+      await showUsage(false);
       continue;
     }
 

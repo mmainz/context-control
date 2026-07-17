@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { getAgentDir as getPiAgentDir } from "@mariozechner/pi-coding-agent";
+import { getAgentDir as getPiAgentDir } from "@earendil-works/pi-coding-agent";
 
 import type {
   ContextControlConfig,
