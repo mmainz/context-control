@@ -20,13 +20,12 @@ export interface RepositoryIdentity {
 }
 
 export interface ContextControlConfig {
-  version: 1;
+  version: 2;
   repository: {
     id: string;
     label: string;
     gitCommonDir?: string;
   };
-  contextFiles: ResourcePolicy;
   skills: ResourcePolicy;
 }
 
@@ -43,5 +42,3 @@ export interface ResourceItem {
   scope?: "user" | "project" | "temporary";
   explicitOnly?: boolean;
 }
-
-export type ResourceKind = "contextFiles" | "skills";

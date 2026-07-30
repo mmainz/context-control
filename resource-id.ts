@@ -14,7 +14,7 @@ async function canonicalize(path: string): Promise<string> {
 
 function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function toPortablePath(path: string): string {

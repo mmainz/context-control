@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   contextFilesFromOptions,
   isProjectResource,
-  pickContextFiles,
   pickSkills,
   skillsFromOptions,
 } from "./resources";
@@ -51,20 +50,35 @@ describe("resource conversion", () => {
       { path: "/repo/AGENTS.md", content: "project" },
       { path: "/outside/AGENTS.md", content: "external" },
     ];
-    const items = await contextFilesFromOptions(
-      { cwd: "/repo", contextFiles },
-      repository,
-    );
+    const items = await contextFilesFromOptions({ cwd: "/repo", contextFiles }, repository);
 
     expect(items[0]?.ref).toMatchObject({
       id: "repo:AGENTS.md",
+      label: "AGENTS.md",
       group: "project",
     });
     expect(isProjectResource(items[0]!)).toBe(true);
     expect(isProjectResource(items[1]!)).toBe(false);
-    expect(pickContextFiles(contextFiles, [items[0]!])).toEqual([
-      contextFiles[0],
-    ]);
+  });
+
+  it("labels nested context files with repository-relative paths", async () => {
+    const [item] = await contextFilesFromOptions(
+      {
+        cwd: "/repo",
+        contextFiles: [
+          {
+            path: "/repo/packages/api/AGENTS.md",
+            content: "nested",
+          },
+        ],
+      },
+      repository,
+    );
+
+    expect(item?.ref).toMatchObject({
+      id: "repo:packages/api/AGENTS.md",
+      label: "packages/api/AGENTS.md",
+    });
   });
 
   it("uses SourceInfo.origin to group top-level and package skills", async () => {
@@ -82,10 +96,7 @@ describe("resource conversion", () => {
       repository,
     );
 
-    expect(items.map((item) => item.ref.group)).toEqual([
-      "project",
-      "project:demo-package",
-    ]);
+    expect(items.map((item) => item.ref.group)).toEqual(["project", "project:demo-package"]);
   });
 
   it("keeps explicitly user-scoped skills outside project ownership", async () => {
@@ -101,10 +112,7 @@ describe("resource conversion", () => {
       },
     };
 
-    const [item] = await skillsFromOptions(
-      { cwd: "/repo", skills: [userSkill] },
-      repository,
-    );
+    const [item] = await skillsFromOptions({ cwd: "/repo", skills: [userSkill] }, repository);
 
     expect(item?.ref.id).toBe("repo:.pi/skills/user-inside-repo/SKILL.md");
     expect(isProjectResource(item!)).toBe(false);
@@ -123,14 +131,9 @@ describe("resource conversion", () => {
       },
     };
 
-    const [item] = await skillsFromOptions(
-      { cwd: "/repo", skills: [temporarySkill] },
-      repository,
-    );
+    const [item] = await skillsFromOptions({ cwd: "/repo", skills: [temporarySkill] }, repository);
 
-    expect(item?.ref.id).toBe(
-      "repo:.agents/skills/temporary-project-skill/SKILL.md",
-    );
+    expect(item?.ref.id).toBe("repo:.agents/skills/temporary-project-skill/SKILL.md");
     expect(isProjectResource(item!)).toBe(true);
   });
 
@@ -138,10 +141,7 @@ describe("resource conversion", () => {
     const visible = skill("visible");
     const hidden = skill("hidden", { hidden: true });
 
-    const items = await skillsFromOptions(
-      { cwd: "/repo", skills: [visible, hidden] },
-      repository,
-    );
+    const items = await skillsFromOptions({ cwd: "/repo", skills: [visible, hidden] }, repository);
 
     expect(items.map((item) => item.ref.label)).toEqual(["visible"]);
   });
@@ -157,20 +157,12 @@ describe("resource conversion", () => {
       },
     ];
 
-    expect(pickSkills([visible, blocked, hidden], kept)).toEqual([
-      visible,
-      hidden,
-    ]);
+    expect(pickSkills([visible, blocked, hidden], kept)).toEqual([visible, hidden]);
   });
 
   it("handles absent resource arrays", async () => {
-    await expect(
-      contextFilesFromOptions({ cwd: "/repo" }, repository),
-    ).resolves.toEqual([]);
-    await expect(
-      skillsFromOptions({ cwd: "/repo" }, repository),
-    ).resolves.toEqual([]);
-    expect(pickContextFiles(undefined, [])).toEqual([]);
+    await expect(contextFilesFromOptions({ cwd: "/repo" }, repository)).resolves.toEqual([]);
+    await expect(skillsFromOptions({ cwd: "/repo" }, repository)).resolves.toEqual([]);
     expect(pickSkills(undefined, [])).toEqual([]);
   });
 });

@@ -1,26 +1,10 @@
 import type { ResourceItem, ResourcePolicy, ResourceRef } from "./types";
 
-function uniqueRefs(refs: ResourceRef[]): ResourceRef[] {
-  const seen = new Set<string>();
-  const unique: ResourceRef[] = [];
-
-  for (const ref of refs) {
-    if (seen.has(ref.id)) continue;
-    seen.add(ref.id);
-    unique.push(ref);
-  }
-
-  return unique;
-}
-
 export function policyRefs(policy: ResourcePolicy): ResourceRef[] {
   return "refs" in policy ? policy.refs : [];
 }
 
-export function applyResourcePolicy<T extends ResourceItem>(
-  items: T[],
-  policy: ResourcePolicy,
-): T[] {
+export function applyResourcePolicy(items: ResourceItem[], policy: ResourcePolicy): ResourceItem[] {
   switch (policy.mode) {
     case "all":
       return items;
@@ -37,40 +21,20 @@ export function applyResourcePolicy<T extends ResourceItem>(
   }
 }
 
-export function createPolicy(mode: "all" | "none"): ResourcePolicy;
-export function createPolicy(
-  mode: "blocklist" | "allowlist",
-  refs: ResourceRef[],
-): ResourcePolicy;
+export function countEnabled(items: ResourceItem[], policy: ResourcePolicy): number {
+  return applyResourcePolicy(items, policy).length;
+}
+
 export function createPolicy(
   mode: ResourcePolicy["mode"],
   refs: ResourceRef[] = [],
 ): ResourcePolicy {
-  switch (mode) {
-    case "all":
-      return { mode: "all" };
-    case "none":
-      return { mode: "none" };
-    case "blocklist":
-      return { mode: "blocklist", refs };
-    case "allowlist":
-      return { mode: "allowlist", refs };
-  }
+  if (mode === "all" || mode === "none") return { mode };
+  return { mode, refs };
 }
 
-export function countEnabled(
-  items: ResourceItem[],
-  policy: ResourcePolicy,
-): number {
-  return applyResourcePolicy(items, policy).length;
-}
-
-export function staleRefs(
-  items: ResourceItem[],
-  policy: ResourcePolicy,
-): ResourceRef[] {
+export function staleRefs(items: ResourceItem[], policy: ResourcePolicy): ResourceRef[] {
   if (!("refs" in policy)) return [];
-
   const currentIds = new Set(items.map((item) => item.ref.id));
   return policy.refs.filter((ref) => !currentIds.has(ref.id));
 }
@@ -81,18 +45,16 @@ export function preserveStaleRefs(
   existingRefs: ResourceRef[],
 ): ResourceRef[] {
   const currentIds = new Set(items.map((item) => item.ref.id));
-  const staleExistingRefs = existingRefs.filter(
-    (ref) => !currentIds.has(ref.id),
-  );
-  return uniqueRefs([...selectedRefs, ...staleExistingRefs]);
+  const staleExistingRefs = existingRefs.filter((ref) => !currentIds.has(ref.id));
+  const merged = new Map<string, ResourceRef>();
+  for (const ref of [...selectedRefs, ...staleExistingRefs]) {
+    merged.set(ref.id, ref);
+  }
+  return [...merged.values()];
 }
 
-export function pruneStaleRefs(
-  items: ResourceItem[],
-  policy: ResourcePolicy,
-): ResourcePolicy {
+export function pruneStaleRefs(items: ResourceItem[], policy: ResourcePolicy): ResourcePolicy {
   if (!("refs" in policy)) return policy;
-
   const currentIds = new Set(items.map((item) => item.ref.id));
   const refs = policy.refs.filter((ref) => currentIds.has(ref.id));
   return { mode: policy.mode, refs };

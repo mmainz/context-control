@@ -12,7 +12,7 @@ const repository: RepositoryIdentity = {
 };
 
 describe("config parsing", () => {
-  it("defaults invalid config to use all context and skills", () => {
+  it("defaults invalid config to use all skills", () => {
     expect(parseConfig({}, repository)).toEqual(defaultConfig(repository));
   });
 
@@ -21,10 +21,7 @@ describe("config parsing", () => {
     expect(
       parseResourcePolicy({
         mode: "allowlist",
-        refs: [
-          { id: "repo:AGENTS.md", path: "/repo/AGENTS.md" },
-          { bad: true },
-        ],
+        refs: [{ id: "repo:AGENTS.md", path: "/repo/AGENTS.md" }, { bad: true }],
       }),
     ).toEqual({
       mode: "allowlist",
@@ -32,7 +29,7 @@ describe("config parsing", () => {
     });
   });
 
-  it("refreshes repository metadata while preserving policies", () => {
+  it("migrates v1 skill policies while dropping context-file policies", () => {
     expect(
       parseConfig(
         {
@@ -44,14 +41,34 @@ describe("config parsing", () => {
         repository,
       ),
     ).toEqual({
-      version: 1,
+      version: 2,
       repository: {
         id: repository.id,
         label: repository.label,
         gitCommonDir: repository.gitCommonDir,
       },
-      contextFiles: { mode: "blocklist", refs: [] },
       skills: { mode: "allowlist", refs: [] },
+    });
+  });
+
+  it("refreshes repository metadata for v2 configs", () => {
+    expect(
+      parseConfig(
+        {
+          version: 2,
+          repository: { id: "old", label: "old" },
+          skills: { mode: "none" },
+        },
+        repository,
+      ),
+    ).toEqual({
+      version: 2,
+      repository: {
+        id: repository.id,
+        label: repository.label,
+        gitCommonDir: repository.gitCommonDir,
+      },
+      skills: { mode: "none" },
     });
   });
 });

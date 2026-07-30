@@ -1,6 +1,6 @@
 # context-control
 
-A pi extension for selecting which project-level context files and skills are active in a repository.
+A Pi extension for controlling which project skills are included in automatic model context for each repository.
 
 Tested with `@earendil-works/pi-coding-agent` 0.80.10. Requires Node.js 22.19 or newer.
 
@@ -12,7 +12,7 @@ Install or load the package, then run:
 /context-control
 ```
 
-The command opens a guided flow for project-level context files and skills in Pi's interactive TUI:
+The command opens a guided flow for project skills in Pi's interactive TUI:
 
 - Use all
 - Use none
@@ -21,32 +21,32 @@ The command opens a guided flow for project-level context files and skills in Pi
 - Inspect context usage
 - Clean stale entries
 
-`Allow selected` switches that project resource type to an allowlist, so newly discovered project files or skills are ignored until explicitly allowed. `Block selected` keeps new project resources enabled by default and excludes only selected resources.
+`Allow selected` enables only selected project skills, so newly discovered project skills remain unavailable to the model until explicitly allowed. `Block selected` keeps new project skills enabled by default and excludes only selected skills.
 
-Global/user-level `AGENTS.md` files and skills are always kept. They are intentionally outside this extension's policy controls.
+Pi exclusively discovers and loads `AGENTS.md` and `CLAUDE.md` instruction files. Context-control does not discover, inject, filter, or configure them. Global/user skills are also outside repository policy and always remain available to the model.
 
-On startup and `/reload`, pi's built-in resource list still shows raw discovery. The extension adds a concise notification/status with effective project counts; run `/context-control` to view the detailed project context and skill policies, enabled entries, and ignored entries. The command reads Pi's current system-prompt options, so its inventory matches resources loaded from packages, settings, CLI options, and the active project.
+On startup and `/reload`, context-control adds a concise notification and status with effective project-skill counts. Run `/context-control` for the detailed policy, enabled and ignored skills, and stale entries. The command reads Pi's current system-prompt options, so its inventory matches skills loaded from packages, settings, CLI options, and the active project.
 
 The extension filters automatic model awareness only. Disabled project skills are removed from the system prompt, but explicit `/skill:name` commands still work when Pi's skill commands are enabled. Skills with `disable-model-invocation: true` are already explicit-only in Pi, so context-control excludes them from policy counts while preserving any registered `/skill:name` invocation.
 
 ## Context usage
 
-Open the policy-aware context report from the main menu or directly:
+Open the context report from the main menu or directly:
 
 ```text
 /context-control usage
 /context-control usage full
 ```
 
-The report analyzes the effective prompt after applying this repository's context-file and skill policies. It distinguishes model-visible resources, policy-blocked resources, explicit-only skills, and currently registered skill slash commands. The full view includes:
+The report analyzes the effective prompt after applying the repository's skill policy. It shows Pi-managed instruction files informationally and distinguishes model-visible skills, skill-policy-blocked skills, explicit-only skills, and registered skill slash commands. The full view includes:
 
 - A segmented context-window pressure map and proportional composition bars
-- A full-view heatmap ranking the largest files, skills, tools, and messages
+- A full-view heatmap ranking the largest instruction files, skills, tools, and messages
 - Active instruction-file and skill-manifest shares of the context window
-- Estimated tokens and context-window percentage saved by ignored files and skills
+- Estimated tokens and context-window percentage saved by blocked project skills
 - Pi-reported usage and an independently estimated snapshot
 - System-prompt composition
-- Effective and blocked context files and skills
+- Model-visible, blocked, explicit-only, and read-disabled skills
 - Guidelines and tool snippets
 - Active tool-definition estimates
 - The compaction-aware conversation breakdown
@@ -64,17 +64,19 @@ Repository settings are stored outside the shared repository under:
 ~/.pi/agent/context-control/
 ```
 
-For git repositories, the config key is based on `git rev-parse --path-format=absolute --git-common-dir`, so linked worktrees for the same clone share one context-control configuration.
+For Git repositories, the config key is based on `git rev-parse --path-format=absolute --git-common-dir`, so linked worktrees for the same clone share one context-control configuration.
 
-Resource identities are path-based. Project resources inside the current worktree use `repo:<relative-path>` ids, which makes the same config usable across linked worktrees.
+Skill identities are path-based. Project skills inside the current worktree use `repo:<relative-path>` ids, which makes the same config usable across linked worktrees. Skills absent from the current worktree remain as stale references until explicitly cleaned.
 
 Repository identity is cached for the current Pi session, while the configuration file is reread before commands and agent turns. External edits are therefore observed between operations; edits made while the interactive configuration flow is already open are not merged into that in-progress transaction.
 
+Legacy version-1 configuration files are read safely: their skill policy is migrated in memory and their former context-file policy is ignored. The next explicit save writes the skill-only version-2 schema.
+
 ## Compatibility notes
 
-Context-control rewrites only Pi's generated context and skill sections, preserving earlier `before_agent_start` changes around them. If another extension mutates those resource sections so they cannot be identified safely, context-control removes recognizable individual entries and emits one warning when filtering may be incomplete.
+Context-control rewrites only Pi's generated skill section and leaves Pi-managed instruction sections untouched. It preserves earlier `before_agent_start` changes around the skill section. If another extension transforms blocked skill entries so they cannot be identified safely, context-control removes recognizable entries and emits one warning when filtering may be incomplete.
 
-The runtime uses Pi's public structured prompt options and skill formatter. The compatibility test suite compares its section rewriting against the current Pi prompt builder so formatting changes fail clearly without requiring a private Pi import in the shipped extension.
+The runtime uses Pi's public structured prompt options and skill formatter. The compatibility test suite compares skill filtering against the current Pi prompt builder; the shipped extension does not import Pi's private internals.
 
 ## Development
 
@@ -84,10 +86,16 @@ Install dependencies:
 bun install
 ```
 
-Run checks:
+Run checks, including the isolated real-Pi startup and skill-policy integration tests:
 
 ```bash
 bun run check
+```
+
+Run only the real-Pi integration tests:
+
+```bash
+bun run test:integration
 ```
 
 Try the extension locally:

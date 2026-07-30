@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  applyResourcePolicy,
-  preserveStaleRefs,
-  pruneStaleRefs,
-  staleRefs,
-} from "./filtering";
+import { applyResourcePolicy, preserveStaleRefs, pruneStaleRefs, staleRefs } from "./filtering";
 import type { ResourceItem, ResourceRef } from "./types";
 
 const alpha: ResourceRef = { id: "repo:alpha", path: "/repo/alpha" };
@@ -26,15 +21,13 @@ describe("resource policies", () => {
   });
 
   it("excludes blocklisted resources", () => {
-    expect(
-      applyResourcePolicy(items, { mode: "blocklist", refs: [beta] }),
-    ).toEqual([items[0]]);
+    expect(applyResourcePolicy(items, { mode: "blocklist", refs: [beta] })).toEqual([items[0]]);
   });
 
   it("includes only allowlisted resources", () => {
-    expect(
-      applyResourcePolicy(items, { mode: "allowlist", refs: [beta, missing] }),
-    ).toEqual([items[1]]);
+    expect(applyResourcePolicy(items, { mode: "allowlist", refs: [beta, missing] })).toEqual([
+      items[1],
+    ]);
   });
 
   it("detects and prunes stale refs", () => {
@@ -48,9 +41,6 @@ describe("resource policies", () => {
   });
 
   it("preserves stale refs when saving an edited policy", () => {
-    expect(preserveStaleRefs(items, [beta], [alpha, missing])).toEqual([
-      beta,
-      missing,
-    ]);
+    expect(preserveStaleRefs(items, [beta], [alpha, missing])).toEqual([beta, missing]);
   });
 });

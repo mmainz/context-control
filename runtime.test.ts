@@ -21,7 +21,7 @@ describe("runtime config loader", () => {
     const loadConfig = vi.fn(() => {
       loads += 1;
       const config = defaultConfig(repository);
-      config.contextFiles = loads === 1 ? { mode: "all" } : { mode: "none" };
+      config.skills = loads === 1 ? { mode: "all" } : { mode: "none" };
       return Promise.resolve({ config, path: `/config/${loads}.json` });
     });
     const loader = createRuntimeConfigLoader(pi, {
@@ -31,11 +31,11 @@ describe("runtime config loader", () => {
 
     await expect(loader.load("/repo")).resolves.toMatchObject({
       configPath: "/config/1.json",
-      config: { contextFiles: { mode: "all" } },
+      config: { skills: { mode: "all" } },
     });
     await expect(loader.load("/repo")).resolves.toMatchObject({
       configPath: "/config/2.json",
-      config: { contextFiles: { mode: "none" } },
+      config: { skills: { mode: "none" } },
     });
     expect(resolveRepositoryIdentity).toHaveBeenCalledTimes(1);
     expect(loadConfig).toHaveBeenCalledTimes(2);

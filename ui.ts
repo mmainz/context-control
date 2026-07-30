@@ -1,11 +1,6 @@
 import { relative } from "node:path";
 
-import {
-  Key,
-  matchesKey,
-  truncateToWidth,
-  wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 import type {
   BuildSystemPromptOptions,
@@ -21,27 +16,18 @@ import {
   pruneStaleRefs,
   staleRefs,
 } from "./filtering";
-import {
-  contextFilesFromOptions,
-  isProjectResource,
-  skillsFromOptions,
-} from "./resources";
+import { isProjectResource, skillsFromOptions } from "./resources";
 import { saveConfig } from "./config";
 import { makeContextControlReport, renderContextControlReport } from "./report";
 import type {
   ContextControlConfig,
   ResourceItem,
-  ResourceKind,
   ResourcePolicy,
   ResourceRef,
   RuntimeConfig,
 } from "./types";
 
 type ResourceLoader = () => Promise<ResourceItem[]>;
-
-function resourceKindLabel(kind: ResourceKind): string {
-  return kind === "contextFiles" ? "project context files" : "project skills";
-}
 
 function policySummary(policy: ResourcePolicy): string {
   switch (policy.mode) {
@@ -61,16 +47,13 @@ function resourceLabel(item: ResourceItem, repositoryLabel: string): string {
     ? relative(repositoryLabel, item.ref.path)
     : item.ref.path;
   const description = item.description ? ` — ${item.description}` : "";
-  return `${item.ref.label ?? item.ref.path} (${relativePath})${description}`;
+  const label = item.ref.label ?? item.ref.path;
+  const location = label === relativePath ? "" : ` (${relativePath})`;
+  return `${label}${location}${description}`;
 }
 
-function mergeRefs(
-  items: ResourceItem[],
-  selectedIds: Set<string>,
-): ResourceRef[] {
-  return items
-    .filter((item) => selectedIds.has(item.ref.id))
-    .map((item) => item.ref);
+function mergeRefs(items: ResourceItem[], selectedIds: Set<string>): ResourceRef[] {
+  return items.filter((item) => selectedIds.has(item.ref.id)).map((item) => item.ref);
 }
 
 function filterItems(
@@ -96,6 +79,24 @@ function filterItems(
   });
 }
 
+function pushWrappedDescription(
+  lines: string[],
+  description: string | undefined,
+  width: number,
+  theme: Theme,
+  indent: string,
+): void {
+  if (!description) return;
+  for (const line of wrapTextWithAnsi(description, width - 4)) {
+    lines.push(theme.fg("muted", `${indent}${line}`));
+  }
+}
+
+function pushMenuHint(lines: string[], hint: string, width: number, theme: Theme): void {
+  lines.push("");
+  lines.push(truncateToWidth(theme.fg("dim", hint), width));
+}
+
 async function chooseRefs(
   ctx: ExtensionCommandContext,
   title: string,
@@ -112,10 +113,7 @@ async function chooseRefs(
 
     function applyFilter() {
       filteredItems = filterItems(items, query, repositoryLabel);
-      selectedIndex = Math.min(
-        selectedIndex,
-        Math.max(0, filteredItems.length - 1),
-      );
+      selectedIndex = Math.min(selectedIndex, Math.max(0, filteredItems.length - 1));
     }
 
     function toggleSelected() {
@@ -192,10 +190,7 @@ async function chooseRefs(
         const maxVisible = 12;
         const start = Math.max(
           0,
-          Math.min(
-            selectedIndex - Math.floor(maxVisible / 2),
-            filteredItems.length - maxVisible,
-          ),
+          Math.min(selectedIndex - Math.floor(maxVisible / 2), filteredItems.length - maxVisible),
         );
         const end = Math.min(start + maxVisible, filteredItems.length);
 
@@ -218,46 +213,26 @@ async function chooseRefs(
             const marker = selectedIds.has(item.ref.id)
               ? theme.fg("success", "[x]")
               : theme.fg("dim", "[ ]");
-            const group = item.ref.group
-              ? theme.fg("muted", `${item.ref.group} `)
-              : "";
+            const group = item.ref.group ? theme.fg("muted", `${item.ref.group} `) : "";
             const label = resourceLabel(item, repositoryLabel);
             const text = isSelected ? theme.fg("accent", label) : label;
-            lines.push(
-              truncateToWidth(`${cursor} ${marker} ${group}${text}`, width),
-            );
+            lines.push(truncateToWidth(`${cursor} ${marker} ${group}${text}`, width));
           }
 
           if (start > 0 || end < filteredItems.length) {
-            lines.push(
-              theme.fg(
-                "dim",
-                `  (${selectedIndex + 1}/${filteredItems.length})`,
-              ),
-            );
+            lines.push(theme.fg("dim", `  (${selectedIndex + 1}/${filteredItems.length})`));
           }
 
           const selectedItem = filteredItems[selectedIndex];
-          if (selectedItem?.description) {
-            lines.push("");
-            for (const line of wrapTextWithAnsi(
-              selectedItem.description,
-              width - 4,
-            )) {
-              lines.push(theme.fg("muted", `  ${line}`));
-            }
-          }
+          if (selectedItem?.description) lines.push("");
+          pushWrappedDescription(lines, selectedItem?.description, width, theme, "  ");
         }
 
-        lines.push("");
-        lines.push(
-          truncateToWidth(
-            theme.fg(
-              "dim",
-              "↑↓ navigate · Enter/Space toggle · type search · Backspace edit · Ctrl+A select filtered · Ctrl+X clear filtered · Esc done",
-            ),
-            width,
-          ),
+        pushMenuHint(
+          lines,
+          "↑↓ navigate · Enter/Space toggle · type search · Backspace edit · Ctrl+A select filtered · Ctrl+X clear filtered · Esc done",
+          width,
+          theme,
         );
         return lines;
       },
@@ -287,14 +262,12 @@ function handleActionMenuInput(
     return selectedIndex;
   }
   if (matchesKey(data, Key.up)) {
-    const nextIndex =
-      selectedIndex === 0 ? actions.length - 1 : selectedIndex - 1;
+    const nextIndex = selectedIndex === 0 ? actions.length - 1 : selectedIndex - 1;
     requestRender();
     return nextIndex;
   }
   if (matchesKey(data, Key.down)) {
-    const nextIndex =
-      selectedIndex === actions.length - 1 ? 0 : selectedIndex + 1;
+    const nextIndex = selectedIndex === actions.length - 1 ? 0 : selectedIndex + 1;
     requestRender();
     return nextIndex;
   }
@@ -318,15 +291,12 @@ function pushActionMenuLines(
     const label = isSelected ? theme.fg("accent", action.label) : action.label;
     lines.push(truncateToWidth(`${cursor} ${label}`, width));
 
-    if (isSelected && action.description) {
-      for (const line of wrapTextWithAnsi(action.description, width - 4)) {
-        lines.push(theme.fg("muted", `    ${line}`));
-      }
+    if (isSelected) {
+      pushWrappedDescription(lines, action.description, width, theme, "    ");
     }
   }
 
-  lines.push("");
-  lines.push(truncateToWidth(theme.fg("dim", hint), width));
+  pushMenuHint(lines, hint, width, theme);
 }
 
 async function chooseAction(
@@ -341,12 +311,8 @@ async function chooseAction(
     return {
       invalidate() {},
       handleInput(data: string) {
-        selectedIndex = handleActionMenuInput(
-          data,
-          actions,
-          selectedIndex,
-          done,
-          () => tui.requestRender(),
+        selectedIndex = handleActionMenuInput(data, actions, selectedIndex, done, () =>
+          tui.requestRender(),
         );
       },
       render(width: number): string[] {
@@ -388,9 +354,7 @@ async function choosePolicyRefs(
     ctx,
     title,
     resources,
-    new Set(
-      existing.filter((ref) => currentIds.has(ref.id)).map((ref) => ref.id),
-    ),
+    new Set(existing.filter((ref) => currentIds.has(ref.id)).map((ref) => ref.id)),
     repositoryLabel,
   );
   if (!selectedRefs) return undefined;
@@ -404,14 +368,13 @@ async function choosePolicyRefs(
 async function saveRefPolicy(
   ctx: ExtensionCommandContext,
   runtime: RuntimeConfig,
-  kind: ResourceKind,
   mode: "blocklist" | "allowlist",
   refs: ResourceRef[],
   selectedCount: number,
   label: string,
   verb: string,
 ): Promise<void> {
-  runtime.config[kind] = createPolicy(mode, refs);
+  runtime.config.skills = createPolicy(mode, refs);
   await saveConfig(runtime.configPath, runtime.config);
   const preservedCount = refs.length - selectedCount;
   ctx.ui.notify(
@@ -420,169 +383,158 @@ async function saveRefPolicy(
   );
 }
 
-async function configureResourceKind(
+const skillPolicyActions: ActionChoice[] = [
+  {
+    id: "use_all",
+    label: "Use all",
+    description: "Enable all current and newly discovered project skills.",
+  },
+  {
+    id: "use_none",
+    label: "Use none",
+    description: "Disable all project skills from automatic model context.",
+  },
+  {
+    id: "block_selected",
+    label: "Block selected...",
+    description: "Keep new project skills enabled by default, but disable selected entries.",
+  },
+  {
+    id: "allow_selected",
+    label: "Allow selected...",
+    description: "Enable only selected project skills. Newly discovered entries stay disabled.",
+  },
+  { id: "back", label: "Back" },
+];
+
+function skillPolicyStatus(resources: ResourceItem[], policy: ResourcePolicy): string {
+  const enabled = countEnabled(resources, policy);
+  const stale = staleRefs(resources, policy).length;
+  const staleSuffix = stale > 0 ? `, ${stale} stale` : "";
+  return `${enabled}/${resources.length} enabled (${policySummary(policy)}${staleSuffix})`;
+}
+
+async function saveSimpleSkillPolicy(
   ctx: ExtensionCommandContext,
   runtime: RuntimeConfig,
-  kind: ResourceKind,
+  mode: "all" | "none",
+): Promise<void> {
+  runtime.config.skills = createPolicy(mode);
+  await saveConfig(runtime.configPath, runtime.config);
+  ctx.ui.notify(`context-control: project skills set to use ${mode}.`, "info");
+}
+
+function initialSelectedRefs(
+  mode: "blocklist" | "allowlist",
+  policy: ResourcePolicy,
+  resources: ResourceItem[],
+): ResourceRef[] {
+  if (policy.mode === mode) return policyRefs(policy);
+  return mode === "allowlist" ? resources.map((item) => item.ref) : [];
+}
+
+async function configureSelectedSkillPolicy(
+  ctx: ExtensionCommandContext,
+  runtime: RuntimeConfig,
+  resources: ResourceItem[],
+  policy: ResourcePolicy,
+  mode: "blocklist" | "allowlist",
+): Promise<boolean> {
+  const action = mode === "blocklist" ? "Block" : "Allow";
+  const selection = await choosePolicyRefs(
+    ctx,
+    `${action} selected project skills`,
+    resources,
+    initialSelectedRefs(mode, policy, resources),
+    runtime.repository.label,
+  );
+  if (!selection) return false;
+
+  await saveRefPolicy(
+    ctx,
+    runtime,
+    mode,
+    selection.refs,
+    selection.selectedCount,
+    "project skills",
+    mode === "blocklist" ? "blocking" : "allowing",
+  );
+  return true;
+}
+
+async function applySkillPolicyChoice(
+  choice: string,
+  ctx: ExtensionCommandContext,
+  runtime: RuntimeConfig,
+  resources: ResourceItem[],
+  policy: ResourcePolicy,
+): Promise<boolean> {
+  switch (choice) {
+    case "use_all":
+      await saveSimpleSkillPolicy(ctx, runtime, "all");
+      return true;
+    case "use_none":
+      await saveSimpleSkillPolicy(ctx, runtime, "none");
+      return true;
+    case "block_selected":
+      return configureSelectedSkillPolicy(ctx, runtime, resources, policy, "blocklist");
+    case "allow_selected":
+      return configureSelectedSkillPolicy(ctx, runtime, resources, policy, "allowlist");
+    default:
+      return false;
+  }
+}
+
+async function configureSkills(
+  ctx: ExtensionCommandContext,
+  runtime: RuntimeConfig,
   loadResources: ResourceLoader,
 ): Promise<boolean> {
-  const label = resourceKindLabel(kind);
-
   while (true) {
-    const policy = runtime.config[kind];
+    const policy = runtime.config.skills;
     const resources = await loadResources();
-    const enabled = countEnabled(resources, policy);
-    const stale = staleRefs(resources, policy).length;
-    const staleSuffix = stale > 0 ? `, ${stale} stale` : "";
-
     const choice = await chooseAction(
       ctx,
-      `context-control: ${label}`,
-      [
-        `${enabled}/${resources.length} enabled (${policySummary(policy)}${staleSuffix})`,
-      ],
-      [
-        {
-          id: "use_all",
-          label: "Use all",
-          description:
-            "Enable all current and newly discovered project resources of this type.",
-        },
-        {
-          id: "use_none",
-          label: "Use none",
-          description: "Disable all project resources of this type.",
-        },
-        {
-          id: "block_selected",
-          label: "Block selected...",
-          description:
-            "Keep new project resources enabled by default, but disable selected entries.",
-        },
-        {
-          id: "allow_selected",
-          label: "Allow selected...",
-          description:
-            "Enable only selected project resources. Newly discovered entries stay disabled until allowed.",
-        },
-        { id: "back", label: "Back" },
-      ],
+      "context-control: project skills",
+      [skillPolicyStatus(resources, policy)],
+      skillPolicyActions,
     );
 
     if (!choice || choice === "back") return false;
-
-    if (choice === "use_all") {
-      runtime.config[kind] = createPolicy("all");
-      await saveConfig(runtime.configPath, runtime.config);
-      ctx.ui.notify(`context-control: ${label} set to use all.`, "info");
-      return true;
-    }
-
-    if (choice === "use_none") {
-      runtime.config[kind] = createPolicy("none");
-      await saveConfig(runtime.configPath, runtime.config);
-      ctx.ui.notify(`context-control: ${label} set to use none.`, "info");
-      return true;
-    }
-
-    if (choice === "block_selected") {
-      const existing = policy.mode === "blocklist" ? policyRefs(policy) : [];
-      const selection = await choosePolicyRefs(
-        ctx,
-        `Block selected ${label}`,
-        resources,
-        existing,
-        runtime.repository.label,
-      );
-      if (!selection) continue;
-
-      await saveRefPolicy(
-        ctx,
-        runtime,
-        kind,
-        "blocklist",
-        selection.refs,
-        selection.selectedCount,
-        label,
-        "blocking",
-      );
-      return true;
-    }
-
-    if (choice === "allow_selected") {
-      const existing =
-        policy.mode === "allowlist"
-          ? policyRefs(policy)
-          : resources.map((item) => item.ref);
-      const selection = await choosePolicyRefs(
-        ctx,
-        `Allow selected ${label}`,
-        resources,
-        existing,
-        runtime.repository.label,
-      );
-      if (!selection) continue;
-
-      await saveRefPolicy(
-        ctx,
-        runtime,
-        kind,
-        "allowlist",
-        selection.refs,
-        selection.selectedCount,
-        label,
-        "allowing",
-      );
-      return true;
-    }
+    if (await applySkillPolicyChoice(choice, ctx, runtime, resources, policy)) return true;
   }
 }
 
 async function cleanStaleRefs(
   ctx: ExtensionCommandContext,
   runtime: RuntimeConfig,
-  loadContextFiles: ResourceLoader,
   loadSkills: ResourceLoader,
 ): Promise<boolean> {
-  const contextFiles = await loadContextFiles();
   const skills = await loadSkills();
-  const staleContextFiles = staleRefs(
-    contextFiles,
-    runtime.config.contextFiles,
-  ).length;
   const staleSkills = staleRefs(skills, runtime.config.skills).length;
 
-  if (staleContextFiles === 0 && staleSkills === 0) {
-    ctx.ui.notify("context-control: no stale entries to clean.", "info");
+  if (staleSkills === 0) {
+    ctx.ui.notify("context-control: no stale skill entries to clean.", "info");
     return false;
   }
 
   const confirmed = await ctx.ui.confirm(
-    "Clean stale entries?",
-    `Remove ${staleContextFiles} stale context file entries and ${staleSkills} stale skill entries from this repository config?`,
+    "Clean stale skill entries?",
+    `Remove ${staleSkills} stale skill entr${staleSkills === 1 ? "y" : "ies"} from this repository config?`,
   );
   if (!confirmed) return false;
 
-  runtime.config.contextFiles = pruneStaleRefs(
-    contextFiles,
-    runtime.config.contextFiles,
-  );
   runtime.config.skills = pruneStaleRefs(skills, runtime.config.skills);
   await saveConfig(runtime.configPath, runtime.config);
-  ctx.ui.notify("context-control: stale entries cleaned.", "info");
+  ctx.ui.notify("context-control: stale skill entries cleaned.", "info");
   return true;
 }
 
-function updateRepositoryMetadata(
-  config: ContextControlConfig,
-  runtime: RuntimeConfig,
-): void {
+function updateRepositoryMetadata(config: ContextControlConfig, runtime: RuntimeConfig): void {
   config.repository = {
     id: runtime.repository.id,
     label: runtime.repository.label,
-    ...(runtime.repository.gitCommonDir
-      ? { gitCommonDir: runtime.repository.gitCommonDir }
-      : {}),
+    ...(runtime.repository.gitCommonDir ? { gitCommonDir: runtime.repository.gitCommonDir } : {}),
   };
 }
 
@@ -594,95 +546,58 @@ export async function runContextControlCommand(
 ): Promise<void> {
   updateRepositoryMetadata(runtime.config, runtime);
 
-  const contextFiles = (
-    await contextFilesFromOptions(options, runtime.repository)
-  ).filter(isProjectResource);
-  const skills = (await skillsFromOptions(options, runtime.repository)).filter(
-    isProjectResource,
-  );
-  const loadContextFiles = () => Promise.resolve(contextFiles);
+  const skills = (await skillsFromOptions(options, runtime.repository)).filter(isProjectResource);
   const loadSkills = () => Promise.resolve(skills);
 
   while (true) {
-    const contextFiles = await loadContextFiles();
-    const skills = await loadSkills();
-    const report = makeContextControlReport({
-      repository: runtime.repository.label,
-      contextFileItems: contextFiles,
-      skillItems: skills,
-      contextPolicy: runtime.config.contextFiles,
-      skillPolicy: runtime.config.skills,
-      configPath: runtime.configPath,
+    const report = makeContextControlReport(runtime, await loadSkills());
+
+    const choice = await ctx.ui.custom<string | undefined>((tui, theme, _kb, done) => {
+      const reportComponent = renderContextControlReport(report, theme);
+      const actions: ActionChoice[] = [
+        { id: "configure_skills", label: "Configure project skills..." },
+        {
+          id: "context_usage",
+          label: "Context usage...",
+          description: "Inspect the effective policy-filtered context window and token estimates.",
+        },
+        {
+          id: "clean_stale",
+          label: "Clean stale entries",
+          description: "Remove config entries for project skills that are no longer discovered.",
+        },
+        { id: "done", label: "Done" },
+      ];
+      let selectedIndex = 0;
+
+      return {
+        invalidate() {
+          reportComponent.invalidate();
+        },
+        handleInput(data: string) {
+          selectedIndex = handleActionMenuInput(data, actions, selectedIndex, done, () =>
+            tui.requestRender(),
+          );
+        },
+        render(width: number): string[] {
+          const lines = [...reportComponent.render(width)];
+          pushActionMenuLines(
+            lines,
+            actions,
+            selectedIndex,
+            width,
+            theme,
+            "↑↓ navigate · Enter/Space select · Esc close",
+          );
+          return lines;
+        },
+      };
     });
-
-    const choice = await ctx.ui.custom<string | undefined>(
-      (tui, theme, _kb, done) => {
-        const reportComponent = renderContextControlReport(report, theme);
-        const actions: ActionChoice[] = [
-          {
-            id: "configure_context",
-            label: "Configure project context files...",
-          },
-          { id: "configure_skills", label: "Configure project skills..." },
-          {
-            id: "context_usage",
-            label: "Context usage...",
-            description:
-              "Inspect the effective policy-filtered context window and token estimates.",
-          },
-          {
-            id: "clean_stale",
-            label: "Clean stale entries",
-            description:
-              "Remove config entries for project resources that are no longer discovered.",
-          },
-          { id: "done", label: "Done" },
-        ];
-        let selectedIndex = 0;
-
-        return {
-          invalidate() {
-            reportComponent.invalidate();
-          },
-          handleInput(data: string) {
-            selectedIndex = handleActionMenuInput(
-              data,
-              actions,
-              selectedIndex,
-              done,
-              () => tui.requestRender(),
-            );
-          },
-          render(width: number): string[] {
-            const lines = [...reportComponent.render(width)];
-            pushActionMenuLines(
-              lines,
-              actions,
-              selectedIndex,
-              width,
-              theme,
-              "↑↓ navigate · Enter/Space select · Esc close",
-            );
-            return lines;
-          },
-        };
-      },
-    );
 
     if (!choice || choice === "done") return;
 
-    if (choice === "configure_context") {
-      await configureResourceKind(
-        ctx,
-        runtime,
-        "contextFiles",
-        loadContextFiles,
-      );
-      continue;
-    }
-
     if (choice === "configure_skills") {
-      await configureResourceKind(ctx, runtime, "skills", loadSkills);
+      await configureSkills(ctx, runtime, loadSkills);
       continue;
     }
 
@@ -692,7 +607,7 @@ export async function runContextControlCommand(
     }
 
     if (choice === "clean_stale") {
-      await cleanStaleRefs(ctx, runtime, loadContextFiles, loadSkills);
+      await cleanStaleRefs(ctx, runtime, loadSkills);
     }
   }
 }

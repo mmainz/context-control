@@ -10,13 +10,9 @@ import {
   type Skill,
 } from "@earendil-works/pi-coding-agent";
 
-import { selectEffectiveContext } from "./effective-context";
-import {
-  formatContextFile,
-  formatContextSection,
-  formatSkillsSection,
-  projectSystemPromptResources,
-} from "./system-prompt";
+import { selectEffectiveSkills } from "./effective-context";
+import { contextFilesFromOptions } from "./resources";
+import { filterSkillSystemPrompt, formatSkillsSection } from "./system-prompt";
 import type { ResourceItem, RuntimeConfig } from "./types";
 
 export type ResourceVisibility =
@@ -108,6 +104,17 @@ export function estimateTextTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+function formatContextFileForEstimate(file: { path: string; content: string }): string {
+  return `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>\n\n`;
+}
+
+function formatContextSectionForEstimate(options: BuildSystemPromptOptions): string {
+  const contextFiles = options.contextFiles ?? [];
+  if (contextFiles.length === 0) return "";
+
+  return `\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n${contextFiles.map(formatContextFileForEstimate).join("")}</project_context>\n`;
+}
+
 function safeStringify(value: unknown): string {
   const seen = new WeakSet<object>();
   try {
@@ -128,11 +135,7 @@ function extractGuidelines(systemPrompt: string): string {
   if (start < 0) return "";
 
   const contentStart = start + marker.length;
-  const candidates = [
-    "\n\nPi documentation",
-    "\n\n<project_context>",
-    "\n\nThe following skills",
-  ];
+  const candidates = ["\n\nPi documentation", "\n\n<project_context>", "\n\nThe following skills"];
   let end = systemPrompt.length;
   for (const candidate of candidates) {
     const index = systemPrompt.indexOf(candidate, contentStart);
@@ -145,10 +148,7 @@ function resourcePathMap<T extends { path?: string; filePath?: string }>(
   resources: T[] | undefined,
 ): Map<string, T> {
   return new Map(
-    (resources ?? []).map((resource) => [
-      resource.path ?? resource.filePath ?? "",
-      resource,
-    ]),
+    (resources ?? []).map((resource) => [resource.path ?? resource.filePath ?? "", resource]),
   );
 }
 
@@ -190,10 +190,8 @@ function summarizeMessage(message: unknown): { role: string; summary: string } {
           name?: string;
         };
         if (value.type === "text" && value.text) return [value.text];
-        if (value.type === "thinking" && value.thinking)
-          return [`thinking: ${value.thinking}`];
-        if (value.type === "toolCall" && value.name)
-          return [`tool: ${value.name}`];
+        if (value.type === "thinking" && value.thinking) return [`thinking: ${value.thinking}`];
+        if (value.type === "toolCall" && value.name) return [`tool: ${value.name}`];
         return [];
       })
       .join(" ");
@@ -201,8 +199,7 @@ function summarizeMessage(message: unknown): { role: string; summary: string } {
   const normalized = text.replace(/\s+/g, " ").trim();
   return {
     role,
-    summary:
-      normalized.length > 0 ? normalized.slice(0, 100) : `${role} message`,
+    summary: normalized.length > 0 ? normalized.slice(0, 100) : `${role} message`,
   };
 }
 
@@ -219,16 +216,12 @@ function assistantToolTokens(message: unknown): number {
       arguments?: unknown;
     };
     if (value.type !== "toolCall") continue;
-    total += estimateTextTokens(
-      `${value.name ?? ""}${safeStringify(value.arguments)}`,
-    );
+    total += estimateTextTokens(`${value.name ?? ""}${safeStringify(value.arguments)}`);
   }
   return total;
 }
 
-function messageTokenEstimate(
-  message: Parameters<typeof estimateTokens>[0],
-): number {
+function messageTokenEstimate(message: Parameters<typeof estimateTokens>[0]): number {
   try {
     return estimateTokens(message);
   } catch {
@@ -240,11 +233,7 @@ function collectConversation(ctx: ExtensionCommandContext): {
   messages: MessageUsage[];
   categories: Pick<
     ContextUsageAnalysis["categories"],
-    | "userMessages"
-    | "assistantMessages"
-    | "toolCalls"
-    | "toolResults"
-    | "otherMessages"
+    "userMessages" | "assistantMessages" | "toolCalls" | "toolResults" | "otherMessages"
   >;
   total: number;
   compaction: ContextUsageAnalysis["compaction"];
@@ -286,8 +275,7 @@ function collectConversation(ctx: ExtensionCommandContext): {
       ? 0
       : branch
           .slice(0, firstKeptIndex)
-          .filter((entry) => ["message", "custom_message"].includes(entry.type))
-          .length;
+          .filter((entry) => ["message", "custom_message"].includes(entry.type)).length;
 
   return {
     messages,
@@ -306,18 +294,14 @@ function collectTools(pi: ExtensionAPI): {
   warnings: string[];
 } {
   const activeNames = new Set(pi.getActiveTools());
-  const toolsByName = new Map(
-    pi.getAllTools().map((tool) => [tool.name, tool]),
-  );
+  const toolsByName = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
   const warnings: string[] = [];
   const tools: ToolDefinitionUsage[] = [];
 
   for (const name of activeNames) {
     const tool = toolsByName.get(name);
     if (!tool) {
-      warnings.push(
-        `Active tool ${name} has no registered definition metadata.`,
-      );
+      warnings.push(`Active tool ${name} has no registered definition metadata.`);
       continue;
     }
     const serialized = safeStringify({
@@ -354,9 +338,7 @@ function commandMap(pi: ExtensionAPI): Map<string, string[]> {
 function skillTokens(skill: Skill | undefined): number {
   if (!skill) return 0;
   const manifest = formatSkillsForPrompt([skill]);
-  const match = /<available_skills>\n([\s\S]+)\n<\/available_skills>/.exec(
-    manifest,
-  );
+  const match = /<available_skills>\n([\s\S]+)\n<\/available_skills>/.exec(manifest);
   return estimateTextTokens(match?.[1] ?? manifest);
 }
 
@@ -368,11 +350,11 @@ export async function analyzeContextUsage(input: {
   compactionReserveTokens?: number;
 }): Promise<ContextUsageAnalysis> {
   const { pi, ctx, runtime, options } = input;
-  const selection = await selectEffectiveContext(options, runtime);
-  const promptProjection = projectSystemPromptResources({
+  const selection = await selectEffectiveSkills(options, runtime);
+  const promptProjection = filterSkillSystemPrompt({
     currentSystemPrompt: ctx.getSystemPrompt(),
     baseOptions: options,
-    filteredOptions: selection.filteredOptions,
+    filteredOptions: selection.effectiveOptions,
   });
   const effectivePrompt = promptProjection.systemPrompt;
   const contextByPath = resourcePathMap(options.contextFiles);
@@ -380,37 +362,20 @@ export async function analyzeContextUsage(input: {
   const slashCommands = commandMap(pi);
   const resources: ContextResourceUsage[] = [];
 
-  for (const item of selection.contextFiles.enabled) {
+  for (const item of await contextFilesFromOptions(options, runtime.repository)) {
     const contextFile = contextByPath.get(item.sourcePath);
     resources.push(
       itemUsage({
         item,
         kind: "context-file",
         visibility: "model-visible",
-        tokens: contextFile
-          ? estimateTextTokens(formatContextFile(contextFile))
-          : 0,
-      }),
-    );
-  }
-  for (const item of selection.contextFiles.blocked) {
-    const contextFile = contextByPath.get(item.sourcePath);
-    resources.push(
-      itemUsage({
-        item,
-        kind: "context-file",
-        visibility: "blocked-by-policy",
-        tokens: contextFile
-          ? estimateTextTokens(formatContextFile(contextFile))
-          : 0,
+        tokens: contextFile ? estimateTextTokens(formatContextFileForEstimate(contextFile)) : 0,
       }),
     );
   }
 
-  const readEnabled =
-    options.selectedTools === undefined ||
-    options.selectedTools.includes("read");
-  for (const item of selection.skills.enabled) {
+  const readEnabled = options.selectedTools === undefined || options.selectedTools.includes("read");
+  for (const item of selection.enabled) {
     const skill = skillByPath.get(item.sourcePath);
     resources.push(
       itemUsage({
@@ -422,7 +387,7 @@ export async function analyzeContextUsage(input: {
       }),
     );
   }
-  for (const item of selection.skills.blocked) {
+  for (const item of selection.blocked) {
     resources.push(
       itemUsage({
         item,
@@ -433,7 +398,7 @@ export async function analyzeContextUsage(input: {
       }),
     );
   }
-  for (const item of selection.skills.explicitOnly) {
+  for (const item of selection.explicitOnly) {
     resources.push(
       itemUsage({
         item,
@@ -446,34 +411,17 @@ export async function analyzeContextUsage(input: {
   }
 
   const systemPromptTokens = estimateTextTokens(effectivePrompt);
-  const expectedContextSection = formatContextSection(
-    selection.filteredOptions,
-  );
-  const expectedSkillSection = formatSkillsSection(selection.filteredOptions);
+  const expectedContextSection = formatContextSectionForEstimate(options);
+  const expectedSkillSection = formatSkillsSection(selection.effectiveOptions);
   const contextSectionTokens = estimateTextTokens(expectedContextSection);
   const skillSectionTokens = estimateTextTokens(expectedSkillSection);
-  const unfilteredContextTokens = estimateTextTokens(
-    formatContextSection(options),
-  );
-  const unfilteredSkillTokens = estimateTextTokens(
-    formatSkillsSection(options),
-  );
-  const savedContextTokens = Math.max(
-    0,
-    unfilteredContextTokens - contextSectionTokens,
-  );
-  const savedSkillTokens = Math.max(
-    0,
-    unfilteredSkillTokens - skillSectionTokens,
-  );
-  const totalSavedTokens = savedContextTokens + savedSkillTokens;
-  const projectedSectionsPresent =
-    (expectedContextSection.length === 0 ||
-      effectivePrompt.includes(expectedContextSection)) &&
-    (expectedSkillSection.length === 0 ||
-      effectivePrompt.includes(expectedSkillSection));
-  const filteringComplete =
-    promptProjection.recognizedResourceSections && projectedSectionsPresent;
+  const unfilteredSkillTokens = estimateTextTokens(formatSkillsSection(options));
+  const savedContextTokens = 0;
+  const savedSkillTokens = Math.max(0, unfilteredSkillTokens - skillSectionTokens);
+  const totalSavedTokens = savedSkillTokens;
+  const projectedSkillSectionPresent =
+    expectedSkillSection.length === 0 || effectivePrompt.includes(expectedSkillSection);
+  const filteringComplete = promptProjection.recognizedSkillSection && projectedSkillSectionPresent;
   const guidelinesText = extractGuidelines(effectivePrompt);
   const guidelineBullets = guidelinesText
     .split("\n")
@@ -481,11 +429,11 @@ export async function analyzeContextUsage(input: {
     .filter((line) => line.startsWith("- "))
     .map((line) => line.slice(2).trim());
   const guidelinesTokens = estimateTextTokens(guidelinesText);
-  const includedToolSnippets = selection.filteredOptions.customPrompt
+  const includedToolSnippets: Record<string, string> = selection.effectiveOptions.customPrompt
     ? {}
     : Object.fromEntries(
-        Object.entries(selection.filteredOptions.toolSnippets ?? {}).filter(
-          ([, snippet]) => effectivePrompt.includes(snippet),
+        Object.entries(selection.effectiveOptions.toolSnippets ?? {}).filter(([, snippet]) =>
+          effectivePrompt.includes(snippet),
         ),
       );
   const toolSnippets = Object.entries(includedToolSnippets)
@@ -494,27 +442,20 @@ export async function analyzeContextUsage(input: {
       tokens: estimateTextTokens(snippet),
     }))
     .sort((left, right) => right.tokens - left.tokens);
-  const toolSnippetTokens = estimateTextTokens(
-    Object.values(includedToolSnippets).join("\n"),
-  );
-  const appendText = selection.filteredOptions.appendSystemPrompt ?? "";
+  const toolSnippetTokens = estimateTextTokens(Object.values(includedToolSnippets).join("\n"));
+  const appendText = selection.effectiveOptions.appendSystemPrompt ?? "";
   const appendTokens =
     appendText.length > 0 && effectivePrompt.includes(appendText)
       ? estimateTextTokens(appendText)
       : 0;
   const knownPromptTokens =
-    contextSectionTokens +
-    skillSectionTokens +
-    guidelinesTokens +
-    toolSnippetTokens +
-    appendTokens;
+    contextSectionTokens + skillSectionTokens + guidelinesTokens + toolSnippetTokens + appendTokens;
 
   const conversation = collectConversation(ctx);
   const toolDefinitions = collectTools(pi);
   const usage = ctx.getContextUsage();
   const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
-  const estimatedTotal =
-    systemPromptTokens + toolDefinitions.total + conversation.total;
+  const estimatedTotal = systemPromptTokens + toolDefinitions.total + conversation.total;
   const reportedTokens = usage?.tokens ?? null;
   const usedForFreeSpace = reportedTokens ?? estimatedTotal;
   const compactionReserve =
@@ -529,15 +470,13 @@ export async function analyzeContextUsage(input: {
   const warnings = [...toolDefinitions.warnings];
   if (!filteringComplete) {
     warnings.push(
-      "Some resource paths remain outside Pi's recognized generated sections; policy projection may be incomplete.",
+      "Some skill paths remain outside Pi's recognized generated section; skill-policy projection may be incomplete.",
     );
   }
   if (!usage) {
     warnings.push("Pi has no provider usage data for this session yet.");
   } else if (usage.tokens === null) {
-    warnings.push(
-      "Pi's current token count is pending; the snapshot total is estimated.",
-    );
+    warnings.push("Pi's current token count is pending; the snapshot total is estimated.");
   }
 
   return {
@@ -555,18 +494,13 @@ export async function analyzeContextUsage(input: {
       toolDefinitions: toolDefinitions.total,
       conversation: conversation.total,
       total: estimatedTotal,
-      percent:
-        contextWindow > 0 ? (estimatedTotal / contextWindow) * 100 : null,
-      deltaFromReported:
-        reportedTokens === null ? null : estimatedTotal - reportedTokens,
+      percent: contextWindow > 0 ? (estimatedTotal / contextWindow) * 100 : null,
+      deltaFromReported: reportedTokens === null ? null : estimatedTotal - reportedTokens,
     },
     categories: {
       ...conversation.categories,
       compactionReserve,
-      freeSpace: Math.max(
-        0,
-        contextWindow - usedForFreeSpace - compactionReserve,
-      ),
+      freeSpace: Math.max(0, contextWindow - usedForFreeSpace - compactionReserve),
     },
     systemPrompt: {
       total: systemPromptTokens,
@@ -588,8 +522,7 @@ export async function analyzeContextUsage(input: {
         saved: savedSkillTokens,
       },
       totalSaved: totalSavedTokens,
-      percentOfWindow:
-        contextWindow > 0 ? (totalSavedTokens / contextWindow) * 100 : null,
+      percentOfWindow: contextWindow > 0 ? (totalSavedTokens / contextWindow) * 100 : null,
       realized: filteringComplete,
     },
     resources,

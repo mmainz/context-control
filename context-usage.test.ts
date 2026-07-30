@@ -16,7 +16,7 @@ import {
   largestContextConsumers,
   renderUsageVisualization,
 } from "./context-usage-ui";
-import { formatContextSection, formatSkillsSection } from "./system-prompt";
+import { formatSkillsSection } from "./system-prompt";
 import type { RuntimeConfig } from "./types";
 
 const repository = {
@@ -49,26 +49,28 @@ function skill(
   };
 }
 
+function formatContextSection(options: BuildSystemPromptOptions): string {
+  const files = options.contextFiles ?? [];
+  if (files.length === 0) return "";
+  const entries = files
+    .map(
+      (file) =>
+        `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>\n\n`,
+    )
+    .join("");
+  return `\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n${entries}</project_context>\n`;
+}
+
 function runtime(): RuntimeConfig {
   return {
     repository,
     configPath: "/config.json",
     config: {
-      version: 1,
+      version: 2,
       repository: {
         id: repository.id,
         label: repository.label,
         gitCommonDir: repository.gitCommonDir,
-      },
-      contextFiles: {
-        mode: "allowlist",
-        refs: [
-          {
-            id: "repo:allowed.md",
-            path: "/repo/allowed.md",
-            label: "allowed.md",
-          },
-        ],
       },
       skills: {
         mode: "allowlist",
@@ -94,7 +96,10 @@ function harness(selectedTools?: string[]) {
     ...(selectedTools ? { selectedTools } : {}),
     contextFiles: [
       { path: "/repo/allowed.md", content: "allowed context" },
-      { path: "/repo/blocked.md", content: "blocked context" },
+      {
+        path: "/repo/packages/api/AGENTS.md",
+        content: "blocked nested context",
+      },
       { path: "/user/AGENTS.md", content: "user context" },
     ],
     skills: [allowedSkill, blockedSkill, userSkill, hiddenSkill],
@@ -157,7 +162,7 @@ describe("context usage analysis", () => {
     expect(allocateBarWidths([0, 0], 100, 20)).toEqual([0, 0]);
   });
 
-  it("applies allowlists while preserving external resources", async () => {
+  it("applies skill allowlists while reporting all Pi context files", async () => {
     const { ctx, options, pi } = harness();
     const analysis = await analyzeContextUsage({
       pi,
@@ -172,26 +177,21 @@ describe("context usage analysis", () => {
         .filter((item) => item.visibility === "model-visible")
         .map((item) => item.label)
         .sort(),
-    ).toEqual(["AGENTS.md", "allowed", "allowed.md", "user-skill"]);
+    ).toEqual(["AGENTS.md", "allowed", "allowed.md", "packages/api/AGENTS.md", "user-skill"]);
     expect(
       analysis.resources
         .filter((item) => item.visibility === "blocked-by-policy")
         .map((item) => item.label),
-    ).toEqual(["blocked.md", "blocked"]);
-    expect(
-      analysis.resources.find((item) => item.label === "hidden"),
-    ).toMatchObject({
+    ).toEqual(["blocked"]);
+    expect(analysis.resources.find((item) => item.label === "hidden")).toMatchObject({
       visibility: "explicit-only",
       tokens: 0,
       slashCommands: ["/skill:hidden"],
     });
     expect(analysis.categories.freeSpace).toBe(78_000);
-    expect(analysis.policyImpact.contextFiles.saved).toBeGreaterThan(0);
+    expect(analysis.policyImpact.contextFiles.saved).toBe(0);
     expect(analysis.policyImpact.skills.saved).toBeGreaterThan(0);
-    expect(analysis.policyImpact.totalSaved).toBe(
-      analysis.policyImpact.contextFiles.saved +
-        analysis.policyImpact.skills.saved,
-    );
+    expect(analysis.policyImpact.totalSaved).toBe(analysis.policyImpact.skills.saved);
   });
 
   it("keeps blocked skills slash-callable but out of automatic context", async () => {
@@ -334,9 +334,7 @@ describe("context usage analysis", () => {
       summary: "A model-visible user message",
     });
     expect(analysis.categories.userMessages).toBeGreaterThan(0);
-    expect(analysis.estimated.conversation).toBe(
-      analysis.categories.userMessages,
-    );
+    expect(analysis.estimated.conversation).toBe(analysis.categories.userMessages);
   });
 
   it("formats summary and full reports with visibility terminology", async () => {
@@ -352,12 +350,10 @@ describe("context usage analysis", () => {
     const full = formatContextUsageLines(analysis, true).join("\n");
 
     expect(summary).toContain("Model-visible skills: 2");
-    expect(summary).toContain("Blocked by policy: 2");
+    expect(summary).toContain("Blocked by skill policy: 1");
     expect(summary).toContain("Explicit-only skills: 1");
-    expect(summary).toContain("Total saved by ignored resources:");
-    expect(summary).toMatch(
-      /Instruction\/context files:.*saved \(.*of window\)/,
-    );
+    expect(summary).toContain("Total saved by skill policy:");
+    expect(summary).toMatch(/Instruction\/context files:.*Pi-managed/);
     expect(summary).toMatch(/Skill manifest:.*saved \(.*of window\)/);
     expect(full).toContain("[Guidelines]");
     expect(full).toContain("[Tool Snippets]");
@@ -368,12 +364,8 @@ describe("context usage analysis", () => {
 
     const consumers = largestContextConsumers(analysis);
     expect(consumers.length).toBeGreaterThan(0);
-    expect(consumers).toEqual(
-      [...consumers].sort((left, right) => right.tokens - left.tokens),
-    );
-    expect(consumers.some((consumer) => consumer.label === "blocked")).toBe(
-      false,
-    );
+    expect(consumers).toEqual([...consumers].sort((left, right) => right.tokens - left.tokens));
+    expect(consumers.some((consumer) => consumer.label === "blocked")).toBe(false);
 
     const theme = {
       fg: (_color: string, text: string) => text,
@@ -382,7 +374,7 @@ describe("context usage analysis", () => {
     const visualization = renderUsageVisualization(analysis, true, 40, theme);
     expect(visualization.join("\n")).toContain("[Context Window Map]");
     expect(visualization.join("\n")).toContain("[Resource Footprint]");
-    expect(visualization.join("\n")).toContain("saved by ignored resources");
+    expect(visualization.join("\n")).toContain("saved by skill policy");
     expect(visualization.join("\n")).toContain("[Largest Context Consumers]");
     expect(visualization.join("\n")).toContain("· free");
     expect(visualization.every((line) => visibleWidth(line) <= 40)).toBe(true);
@@ -433,9 +425,7 @@ describe("context usage analysis", () => {
       {
         ...analysis,
         resources: analysis.resources.map((resource, index) =>
-          index === 0
-            ? { ...resource, label: "非常に長い📚コンテキスト名" }
-            : resource,
+          index === 0 ? { ...resource, label: "非常に長い📚コンテキスト名" } : resource,
         ),
       },
       true,
@@ -443,8 +433,6 @@ describe("context usage analysis", () => {
       theme,
     );
     expect(narrow.every((line) => visibleWidth(line) <= 24)).toBe(true);
-    expect(narrow.join("\n")).toContain(
-      String(largestContextConsumers(analysis)[0]?.tokens),
-    );
+    expect(narrow.join("\n")).toContain(String(largestContextConsumers(analysis)[0]?.tokens));
   });
 });

@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { FilteredSystemPromptInput } from "./system-prompt";
+import type { SkillFilteredSystemPromptResult } from "./system-prompt";
 import type { ResourcePolicy, RuntimeConfig } from "./types";
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   clearRuntime: vi.fn(),
   analyzeContextUsage: vi.fn(),
   showContextUsage: vi.fn(),
-  buildFilteredSystemPrompt: vi.fn(),
+  filterSkillSystemPrompt: vi.fn(),
   runContextControlCommand: vi.fn(),
 }));
 
@@ -38,9 +38,13 @@ vi.mock("./runtime", () => ({
   }),
 }));
 
-vi.mock("./system-prompt", () => ({
-  buildFilteredSystemPrompt: mocks.buildFilteredSystemPrompt,
-}));
+vi.mock("./system-prompt", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./system-prompt")>();
+  return {
+    ...actual,
+    filterSkillSystemPrompt: mocks.filterSkillSystemPrompt,
+  };
+});
 
 vi.mock("./ui", () => ({
   runContextControlCommand: mocks.runContextControlCommand,
@@ -69,21 +73,17 @@ function simplePolicy(mode: "all" | "none"): ResourcePolicy {
   return mode === "all" ? { mode: "all" } : { mode: "none" };
 }
 
-function runtime(
-  contextMode: "all" | "none" = "all",
-  skillMode: "all" | "none" = "all",
-): RuntimeConfig {
+function runtime(skillMode: "all" | "none" = "all"): RuntimeConfig {
   return {
     repository,
     configPath: "/config.json",
     config: {
-      version: 1,
+      version: 2,
       repository: {
         id: repository.id,
         label: repository.label,
         gitCommonDir: repository.gitCommonDir,
       },
-      contextFiles: simplePolicy(contextMode),
       skills: simplePolicy(skillMode),
     },
   };
@@ -132,12 +132,13 @@ function createContext(mode: ExtensionContext["mode"] = "tui", hasUI = true) {
 }
 
 function visibleSkill(name: string, scope: "project" | "user"): Skill {
-  const filePath = `/${scope}/${name}/SKILL.md`;
+  const root = scope === "project" ? "/repo/.pi/skills" : "/user/skills";
+  const filePath = `${root}/${name}/SKILL.md`;
   return {
     name,
     description: `${name} description`,
     filePath,
-    baseDir: `/${scope}/${name}`,
+    baseDir: `${root}/${name}`,
     sourceInfo: {
       path: filePath,
       source: "skills",
@@ -153,14 +154,14 @@ beforeEach(() => {
   mocks.clearRuntime.mockReset();
   mocks.analyzeContextUsage.mockReset();
   mocks.showContextUsage.mockReset();
-  mocks.buildFilteredSystemPrompt.mockReset();
+  mocks.filterSkillSystemPrompt.mockReset();
   mocks.runContextControlCommand.mockReset();
   mocks.loadRuntime.mockResolvedValue(runtime());
   mocks.analyzeContextUsage.mockResolvedValue({ model: { label: "test" } });
-  mocks.buildFilteredSystemPrompt.mockReturnValue({
+  mocks.filterSkillSystemPrompt.mockReturnValue({
     systemPrompt: "filtered prompt",
-    preservedChainedChanges: true,
-  });
+    recognizedSkillSection: true,
+  } satisfies SkillFilteredSystemPromptResult);
 });
 
 afterEach(() => {
@@ -179,7 +180,7 @@ describe("context-control extension", () => {
     ]);
   });
 
-  it("does not rebuild the prompt when both policies use all", async () => {
+  it("does not rebuild the prompt when all discovered skills remain enabled", async () => {
     const { handlers } = createHarness();
     const { context } = createContext();
     const event: BeforeAgentStartEvent = {
@@ -192,11 +193,11 @@ describe("context-control extension", () => {
     const result = await handlers.get("before_agent_start")?.(event, context);
 
     expect(result).toBeUndefined();
-    expect(mocks.buildFilteredSystemPrompt).not.toHaveBeenCalled();
+    expect(mocks.filterSkillSystemPrompt).not.toHaveBeenCalled();
   });
 
-  it("filters only project resources and preserves hidden skills", async () => {
-    mocks.loadRuntime.mockResolvedValue(runtime("none", "none"));
+  it("filters only project skills and preserves context, user, and hidden resources", async () => {
+    mocks.loadRuntime.mockResolvedValue(runtime("none"));
     const { handlers } = createHarness();
     const { context } = createContext();
     const hiddenSkill = {
@@ -207,13 +208,9 @@ describe("context-control extension", () => {
       cwd: "/repo",
       contextFiles: [
         { path: "/repo/AGENTS.md", content: "project" },
-        { path: "/outside/AGENTS.md", content: "user" },
+        { path: "/outside/AGENTS.md", content: "external" },
       ],
-      skills: [
-        visibleSkill("project", "project"),
-        visibleSkill("user", "user"),
-        hiddenSkill,
-      ],
+      skills: [visibleSkill("project", "project"), visibleSkill("user", "user"), hiddenSkill],
     };
     const event: BeforeAgentStartEvent = {
       type: "before_agent_start",
@@ -228,20 +225,19 @@ describe("context-control extension", () => {
     )) as BeforeAgentStartEventResult;
 
     expect(result).toEqual({ systemPrompt: "filtered prompt" });
-    const input = mocks.buildFilteredSystemPrompt.mock.calls[0]?.[0] as
-      | FilteredSystemPromptInput
+    const input = mocks.filterSkillSystemPrompt.mock.calls[0]?.[0] as
+      | {
+          currentSystemPrompt: string;
+          baseOptions: BuildSystemPromptOptions;
+          filteredOptions: BuildSystemPromptOptions;
+        }
       | undefined;
     expect(input).toMatchObject({
       currentSystemPrompt: "prefix base suffix",
       baseOptions: options,
     });
-    expect(input?.filteredOptions.contextFiles).toEqual([
-      options.contextFiles?.[1],
-    ]);
-    expect(input?.filteredOptions.skills).toEqual([
-      options.skills?.[1],
-      hiddenSkill,
-    ]);
+    expect(input?.filteredOptions.contextFiles).toEqual(options.contextFiles);
+    expect(input?.filteredOptions.skills).toEqual([options.skills?.[1], hiddenSkill]);
   });
 
   it("rejects the interactive command outside TUI mode", async () => {
@@ -351,11 +347,11 @@ describe("context-control extension", () => {
     expect(ui.setStatus).toHaveBeenLastCalledWith("context-control", undefined);
   });
 
-  it("warns once when an incompatible prompt replacement cannot be merged", async () => {
-    mocks.loadRuntime.mockResolvedValue(runtime("none", "all"));
-    mocks.buildFilteredSystemPrompt.mockReturnValue({
+  it("warns once when an incompatible skill replacement cannot be merged", async () => {
+    mocks.loadRuntime.mockResolvedValue(runtime("none"));
+    mocks.filterSkillSystemPrompt.mockReturnValue({
       systemPrompt: "filtered prompt",
-      preservedChainedChanges: false,
+      recognizedSkillSection: false,
     });
     const { handlers } = createHarness();
     const { context, ui } = createContext();
@@ -363,7 +359,10 @@ describe("context-control extension", () => {
       type: "before_agent_start",
       prompt: "hello",
       systemPrompt: "replacement",
-      systemPromptOptions: { cwd: "/repo" },
+      systemPromptOptions: {
+        cwd: "/repo",
+        skills: [visibleSkill("project", "project")],
+      },
     };
 
     await handlers.get("before_agent_start")?.(event, context);

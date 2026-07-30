@@ -1,18 +1,7 @@
-import {
-  truncateToWidth,
-  visibleWidth,
-  wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
-import type {
-  ExtensionCommandContext,
-  Theme,
-  ThemeColor,
-} from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type { ExtensionCommandContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 
-import type {
-  ContextResourceUsage,
-  ContextUsageAnalysis,
-} from "./context-usage";
+import type { ContextResourceUsage, ContextUsageAnalysis } from "./context-usage";
 
 function formatTokens(tokens: number | null): string {
   if (tokens === null) return "pending";
@@ -28,9 +17,7 @@ function formatPercent(percent: number | null): string {
 }
 
 function formatWindowShare(tokens: number, contextWindow: number): string {
-  return contextWindow > 0
-    ? formatPercent((tokens / contextWindow) * 100)
-    : "n/a";
+  return contextWindow > 0 ? formatPercent((tokens / contextWindow) * 100) : "n/a";
 }
 
 interface BarSegment {
@@ -46,11 +33,7 @@ export interface ContextConsumer {
   tokens: number;
 }
 
-export function allocateBarWidths(
-  values: number[],
-  total: number,
-  width: number,
-): number[] {
+export function allocateBarWidths(values: number[], total: number, width: number): number[] {
   if (width <= 0 || total <= 0) return values.map(() => 0);
   const normalized = values.map((value) => Math.max(0, value));
   if (normalized.every((value) => value === 0)) return values.map(() => 0);
@@ -90,10 +73,7 @@ export function largestContextConsumers(
   limit = 10,
 ): ContextConsumer[] {
   const resources: ContextConsumer[] = analysis.resources
-    .filter(
-      (resource) =>
-        resource.visibility === "model-visible" && resource.tokens > 0,
-    )
+    .filter((resource) => resource.visibility === "model-visible" && resource.tokens > 0)
     .map((resource) => ({
       kind: resource.kind,
       label: resource.label,
@@ -117,14 +97,11 @@ export function largestContextConsumers(
 
 function resourceLabel(resource: ContextResourceUsage): string {
   const commands =
-    resource.slashCommands.length > 0
-      ? ` · ${resource.slashCommands.join(", ")}`
-      : "";
+    resource.slashCommands.length > 0 ? ` · ${resource.slashCommands.join(", ")}` : "";
   const tokenLabel =
     resource.visibility === "blocked-by-policy"
       ? `~${formatTokens(resource.tokens)} tokens if enabled`
-      : resource.visibility === "explicit-only" ||
-          resource.visibility === "read-tool-disabled"
+      : resource.visibility === "explicit-only" || resource.visibility === "read-tool-disabled"
         ? "0 automatic tokens"
         : `~${formatTokens(resource.tokens)} tokens`;
   return `${resource.label} · ${tokenLabel}${commands}`;
@@ -147,10 +124,7 @@ function pushResourceSection(
   lines.push("");
 }
 
-export function formatContextUsageLines(
-  analysis: ContextUsageAnalysis,
-  full: boolean,
-): string[] {
+export function formatContextUsageLines(analysis: ContextUsageAnalysis, full: boolean): string[] {
   const lines: string[] = [
     "[Context Usage]",
     `  Model: ${analysis.model.provider ? `${analysis.model.provider}/` : ""}${analysis.model.label}`,
@@ -177,13 +151,10 @@ export function formatContextUsageLines(
   }
 
   const visibleContext = analysis.resources.filter(
-    (resource) =>
-      resource.kind === "context-file" &&
-      resource.visibility === "model-visible",
+    (resource) => resource.kind === "context-file" && resource.visibility === "model-visible",
   );
   const visibleSkills = analysis.resources.filter(
-    (resource) =>
-      resource.kind === "skill" && resource.visibility === "model-visible",
+    (resource) => resource.kind === "skill" && resource.visibility === "model-visible",
   );
   const blocked = analysis.resources.filter(
     (resource) => resource.visibility === "blocked-by-policy",
@@ -199,15 +170,15 @@ export function formatContextUsageLines(
     "[Effective Resources]",
     `  Model-visible context files: ${visibleContext.length}`,
     `  Model-visible skills: ${visibleSkills.length}`,
-    `  Blocked by policy: ${blocked.length}`,
+    `  Blocked by skill policy: ${blocked.length}`,
     `  Explicit-only skills: ${explicitOnly.length}`,
     `  Skills hidden because read is inactive: ${readDisabled.length}`,
     "  Slash commands are shown separately from automatic model visibility.",
     "",
-    "[Policy Impact]",
-    `  Instruction/context files: ${formatTokens(analysis.policyImpact.contextFiles.active)} active (${formatWindowShare(analysis.policyImpact.contextFiles.active, analysis.model.contextWindow)} of window) · ${formatTokens(analysis.policyImpact.contextFiles.saved)} saved (${formatWindowShare(analysis.policyImpact.contextFiles.saved, analysis.model.contextWindow)} of window)`,
+    "[Skill Policy Impact]",
+    `  Instruction/context files: ${formatTokens(analysis.policyImpact.contextFiles.active)} active (${formatWindowShare(analysis.policyImpact.contextFiles.active, analysis.model.contextWindow)} of window) · Pi-managed`,
     `  Skill manifest: ${formatTokens(analysis.policyImpact.skills.active)} active (${formatWindowShare(analysis.policyImpact.skills.active, analysis.model.contextWindow)} of window) · ${formatTokens(analysis.policyImpact.skills.saved)} saved (${formatWindowShare(analysis.policyImpact.skills.saved, analysis.model.contextWindow)} of window)`,
-    `  ${analysis.policyImpact.realized ? "Total saved by" : "Projected savings from"} ignored resources: ${formatTokens(analysis.policyImpact.totalSaved)} (${formatPercent(analysis.policyImpact.percentOfWindow)} of window)`,
+    `  ${analysis.policyImpact.realized ? "Total saved by" : "Projected savings from"} skill policy: ${formatTokens(analysis.policyImpact.totalSaved)} (${formatPercent(analysis.policyImpact.percentOfWindow)} of window)`,
     "",
   );
 
@@ -231,7 +202,7 @@ export function formatContextUsageLines(
     `  Guidelines: ${formatTokens(analysis.systemPrompt.guidelines)}`,
     `  Tool snippets: ${formatTokens(analysis.systemPrompt.toolSnippets)}`,
     `  Appended text: ${formatTokens(analysis.systemPrompt.appendText)}`,
-    `  Resource filtering identified completely: ${analysis.systemPrompt.filteringComplete ? "yes" : "no"}`,
+    `  Skill filtering identified completely: ${analysis.systemPrompt.filteringComplete ? "yes" : "no"}`,
     "",
   );
 
@@ -266,9 +237,7 @@ export function formatContextUsageLines(
     lines.push("  (none)");
   } else {
     for (const tool of analysis.tools) {
-      lines.push(
-        `  ${tool.name} · ${tool.source} · ~${formatTokens(tool.tokens)} tokens`,
-      );
+      lines.push(`  ${tool.name} · ${tool.source} · ~${formatTokens(tool.tokens)} tokens`);
     }
   }
   lines.push("");
@@ -278,9 +247,7 @@ export function formatContextUsageLines(
     lines.push("  (no model-visible messages)");
   } else {
     for (const message of analysis.messages) {
-      lines.push(
-        `  ${message.index}. ${message.role} · ~${formatTokens(message.tokens)} tokens`,
-      );
+      lines.push(`  ${message.index}. ${message.role} · ~${formatTokens(message.tokens)} tokens`);
       lines.push(`    ${message.summary}`);
     }
   }
@@ -408,21 +375,12 @@ function renderSegmentedBar(
       theme.fg(segment.color, segment.glyph.repeat(segmentWidths[index] ?? 0)),
     )
     .join("");
-  return truncateToWidth(
-    `${theme.fg("border", "│")}${content}${theme.fg("border", "│")}`,
-    width,
-  );
+  return truncateToWidth(`${theme.fg("border", "│")}${content}${theme.fg("border", "│")}`, width);
 }
 
-function renderLegend(
-  segments: BarSegment[],
-  width: number,
-  theme: Theme,
-): string[] {
+function renderLegend(segments: BarSegment[], width: number, theme: Theme): string[] {
   const visible = segments.filter((segment) => segment.value > 0);
-  const groups = [visible.slice(0, 4), visible.slice(4)].filter(
-    (group) => group.length > 0,
-  );
+  const groups = [visible.slice(0, 4), visible.slice(4)].filter((group) => group.length > 0);
   return groups.flatMap((group) => {
     const legend = group
       .map(
@@ -430,9 +388,7 @@ function renderLegend(
           `${theme.fg(segment.color, segment.glyph === "·" ? "·" : "■")} ${segment.label}`,
       )
       .join(theme.fg("dim", " · "));
-    return wrapTextWithAnsi(legend, Math.max(1, width - 2)).map(
-      (line) => `  ${line}`,
-    );
+    return wrapTextWithAnsi(legend, Math.max(1, width - 2)).map((line) => `  ${line}`);
   });
 }
 
@@ -441,9 +397,7 @@ function padToVisibleWidth(text: string, width: number): string {
 }
 
 function indentWrapped(text: string, width: number): string[] {
-  return wrapTextWithAnsi(text, Math.max(1, width - 2)).map(
-    (line) => `  ${line}`,
-  );
+  return wrapTextWithAnsi(text, Math.max(1, width - 2)).map((line) => `  ${line}`);
 }
 
 function renderCategoryBar(input: {
@@ -463,10 +417,7 @@ function renderCategoryBar(input: {
     const barWidth = Math.max(1, input.width - metricWidth - 3);
     const fill = Math.round((Math.min(100, percent) / 100) * barWidth);
     return [
-      truncateToWidth(
-        `  ${padToVisibleWidth(label, labelWidth)} ${valueLabel}`,
-        input.width,
-      ),
+      truncateToWidth(`  ${padToVisibleWidth(label, labelWidth)} ${valueLabel}`, input.width),
       truncateToWidth(
         `  ${input.theme.fg(input.color, "█".repeat(fill))}${input.theme.fg("dim", "░".repeat(barWidth - fill))} ${valueLabel}`,
         input.width,
@@ -476,20 +427,13 @@ function renderCategoryBar(input: {
 
   const labelWidth = 14;
   const valueWidth = Math.max(9, valueLabel.length);
-  const barWidth = Math.max(
-    8,
-    Math.min(30, input.width - labelWidth - valueWidth - 5),
-  );
+  const barWidth = Math.max(8, Math.min(30, input.width - labelWidth - valueWidth - 5));
   const fill = Math.round((Math.min(100, percent) / 100) * barWidth);
   const line = `  ${input.label.padEnd(labelWidth)} ${input.theme.fg(input.color, "█".repeat(fill))}${input.theme.fg("dim", "░".repeat(barWidth - fill))} ${valueLabel.padStart(valueWidth)}`;
   return [truncateToWidth(line, input.width)];
 }
 
-function renderPolicyImpact(
-  analysis: ContextUsageAnalysis,
-  width: number,
-  theme: Theme,
-): string[] {
+function renderPolicyImpact(analysis: ContextUsageAnalysis, width: number, theme: Theme): string[] {
   const rows = [
     {
       label: "Instruction/context files",
@@ -514,7 +458,7 @@ function renderPolicyImpact(
     ...indentWrapped(
       theme.fg(
         impactColor,
-        `${formatTokens(analysis.policyImpact.totalSaved)} tokens ${analysis.policyImpact.realized ? "saved" : "projected to be saved"} by ignored resources · ${formatPercent(analysis.policyImpact.percentOfWindow)} of the context window`,
+        `${formatTokens(analysis.policyImpact.totalSaved)} tokens ${analysis.policyImpact.realized ? "saved" : "projected to be saved"} by skill policy · ${formatPercent(analysis.policyImpact.percentOfWindow)} of the context window`,
       ),
       width,
     ),
@@ -587,21 +531,12 @@ function renderConsumerHeatmap(
   const barWidth = Math.max(6, Math.min(24, width - 34));
   for (const consumer of consumers) {
     const color = consumerColor(consumer);
-    const fill = Math.max(
-      1,
-      Math.round((consumer.tokens / maximum) * barWidth),
-    );
+    const fill = Math.max(1, Math.round((consumer.tokens / maximum) * barWidth));
     const kind = consumerKindLabel(consumer);
     if (width < 54) {
       const tokenLabel = formatTokens(consumer.tokens);
-      const narrowBarWidth = Math.max(
-        1,
-        Math.min(24, width - tokenLabel.length - 4),
-      );
-      const narrowFill = Math.max(
-        1,
-        Math.round((consumer.tokens / maximum) * narrowBarWidth),
-      );
+      const narrowBarWidth = Math.max(1, Math.min(24, width - tokenLabel.length - 4));
+      const narrowFill = Math.max(1, Math.round((consumer.tokens / maximum) * narrowBarWidth));
       lines.push(
         truncateToWidth(`  [${kind}] ${consumer.label}`, width),
         truncateToWidth(
@@ -635,10 +570,7 @@ export function renderUsageVisualization(
   const windowLines =
     total <= 0
       ? indentWrapped(
-          theme.fg(
-            "warning",
-            "Window size unavailable; pressure cannot be mapped.",
-          ),
+          theme.fg("warning", "Window size unavailable; pressure cannot be mapped."),
           width,
         )
       : [
@@ -701,9 +633,7 @@ export function renderUsageVisualization(
     ...renderPolicyImpact(analysis, width, theme),
   ];
   if (full) lines.push(...renderConsumerHeatmap(analysis, width, theme));
-  return lines.flatMap((line) =>
-    line.length === 0 ? [""] : wrapTextWithAnsi(line, width),
-  );
+  return lines.flatMap((line) => (line.length === 0 ? [""] : wrapTextWithAnsi(line, width)));
 }
 
 export async function showContextUsage(
@@ -766,13 +696,10 @@ export async function showContextUsage(
           tui.requestRender();
           return;
         }
-        if (keybindings.matches(data, "tui.select.up"))
-          scroll = Math.max(0, scroll - 1);
+        if (keybindings.matches(data, "tui.select.up")) scroll = Math.max(0, scroll - 1);
         if (keybindings.matches(data, "tui.select.down")) scroll += 1;
-        if (keybindings.matches(data, "tui.select.pageUp"))
-          scroll = Math.max(0, scroll - pageSize);
-        if (keybindings.matches(data, "tui.select.pageDown"))
-          scroll += pageSize;
+        if (keybindings.matches(data, "tui.select.pageUp")) scroll = Math.max(0, scroll - pageSize);
+        if (keybindings.matches(data, "tui.select.pageDown")) scroll += pageSize;
         tui.requestRender();
       },
       render(width: number): string[] {

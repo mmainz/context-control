@@ -10,7 +10,7 @@ import type {
   ResourceRef,
 } from "./types";
 
-export function getAgentDir(): string {
+function getAgentDir(): string {
   return getPiAgentDir();
 }
 
@@ -18,26 +18,18 @@ function getContextControlDir(agentDir = getAgentDir()): string {
   return join(agentDir, "context-control");
 }
 
-function getConfigPath(
-  repository: RepositoryIdentity,
-  agentDir = getAgentDir(),
-): string {
+function getConfigPath(repository: RepositoryIdentity, agentDir = getAgentDir()): string {
   return join(getContextControlDir(agentDir), `${repository.configKey}.json`);
 }
 
-export function defaultConfig(
-  repository: RepositoryIdentity,
-): ContextControlConfig {
+export function defaultConfig(repository: RepositoryIdentity): ContextControlConfig {
   return {
-    version: 1,
+    version: 2,
     repository: {
       id: repository.id,
       label: repository.label,
-      ...(repository.gitCommonDir
-        ? { gitCommonDir: repository.gitCommonDir }
-        : {}),
+      ...(repository.gitCommonDir ? { gitCommonDir: repository.gitCommonDir } : {}),
     },
-    contextFiles: { mode: "all" },
     skills: { mode: "all" },
   };
 }
@@ -48,8 +40,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseResourceRef(value: unknown): ResourceRef | undefined {
   if (!isRecord(value)) return undefined;
-  if (typeof value.id !== "string" || typeof value.path !== "string")
-    return undefined;
+  if (typeof value.id !== "string" || typeof value.path !== "string") return undefined;
 
   return {
     id: value.id,
@@ -83,22 +74,17 @@ export function parseResourcePolicy(value: unknown): ResourcePolicy {
   }
 }
 
-export function parseConfig(
-  value: unknown,
-  repository: RepositoryIdentity,
-): ContextControlConfig {
-  if (!isRecord(value) || value.version !== 1) return defaultConfig(repository);
+export function parseConfig(value: unknown, repository: RepositoryIdentity): ContextControlConfig {
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2))
+    return defaultConfig(repository);
 
   return {
-    version: 1,
+    version: 2,
     repository: {
       id: repository.id,
       label: repository.label,
-      ...(repository.gitCommonDir
-        ? { gitCommonDir: repository.gitCommonDir }
-        : {}),
+      ...(repository.gitCommonDir ? { gitCommonDir: repository.gitCommonDir } : {}),
     },
-    contextFiles: parseResourcePolicy(value.contextFiles),
     skills: parseResourcePolicy(value.skills),
   };
 }
@@ -120,16 +106,9 @@ export async function loadConfig(
   }
 }
 
-export async function saveConfig(
-  path: string,
-  config: ContextControlConfig,
-): Promise<void> {
+export async function saveConfig(path: string, config: ContextControlConfig): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = `${path}.tmp`;
-  await writeFile(
-    temporaryPath,
-    `${JSON.stringify(config, null, 2)}\n`,
-    "utf8",
-  );
+  await writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   await rename(temporaryPath, path);
 }

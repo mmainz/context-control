@@ -2,16 +2,14 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  formatSkillsForPrompt,
   getPackageDir,
   type BuildSystemPromptOptions,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import {
-  buildFilteredSystemPrompt,
-  projectSystemPromptResources,
-} from "./system-prompt";
+import { filterSkillSystemPrompt, formatSkillsSection } from "./system-prompt";
 
 type SystemPromptBuilder = (options: BuildSystemPromptOptions) => string;
 
@@ -23,17 +21,7 @@ async function loadCurrentPiBuilder(): Promise<SystemPromptBuilder> {
   return module.buildSystemPrompt;
 }
 
-const baseOptions: BuildSystemPromptOptions = {
-  cwd: "/repo",
-  contextFiles: [{ path: "/repo/AGENTS.md", content: "PROJECT_CONTEXT" }],
-  skills: [],
-};
-const filteredOptions: BuildSystemPromptOptions = {
-  ...baseOptions,
-  contextFiles: [],
-};
-
-function skill(name: string): Skill {
+function skill(name: string, hidden = false): Skill {
   return {
     name,
     description: `${name} description`,
@@ -45,174 +33,203 @@ function skill(name: string): Skill {
       scope: "project",
       origin: "top-level",
     },
-    disableModelInvocation: false,
+    disableModelInvocation: hidden,
   };
 }
 
-describe("system prompt filtering", () => {
-  it("removes context from Pi's current base prompt", async () => {
+const kept = skill("kept");
+const blocked = skill("blocked");
+const hidden = skill("hidden", true);
+const baseOptions: BuildSystemPromptOptions = {
+  cwd: "/repo",
+  contextFiles: [{ path: "/repo/AGENTS.md", content: "PROJECT_CONTEXT" }],
+  skills: [kept, blocked, hidden],
+};
+const filteredOptions: BuildSystemPromptOptions = {
+  ...baseOptions,
+  skills: [kept, hidden],
+};
+
+describe("skill prompt filtering", () => {
+  it("leaves the prompt unchanged when the skill manifest is unchanged", () => {
+    expect(
+      filterSkillSystemPrompt({
+        currentSystemPrompt: "custom prompt",
+        baseOptions,
+        filteredOptions: baseOptions,
+      }),
+    ).toEqual({
+      systemPrompt: "custom prompt",
+      recognizedSkillSection: true,
+    });
+  });
+
+  it("removes blocked skills while preserving Pi-managed context files", async () => {
     const builder = await loadCurrentPiBuilder();
     const currentSystemPrompt = builder(baseOptions);
 
-    const result = buildFilteredSystemPrompt({
+    const result = filterSkillSystemPrompt({
       currentSystemPrompt,
       baseOptions,
       filteredOptions,
     });
 
-    expect(result.preservedChainedChanges).toBe(true);
-    expect(result.systemPrompt).not.toContain("PROJECT_CONTEXT");
-    expect(result.systemPrompt).toContain("Current working directory: /repo");
+    expect(result.recognizedSkillSection).toBe(true);
+    expect(result.systemPrompt).toContain("PROJECT_CONTEXT");
+    expect(result.systemPrompt).toContain("kept description");
+    expect(result.systemPrompt).not.toContain("blocked description");
   });
 
-  it("preserves prompt changes wrapped around Pi's resource sections", async () => {
+  it("does not rewrite skill-like XML inside Pi-managed instruction files", async () => {
+    const builder = await loadCurrentPiBuilder();
+    const instructionManifest = formatSkillsForPrompt([blocked]);
+    const options = {
+      ...baseOptions,
+      contextFiles: [
+        {
+          path: "/repo/AGENTS.md",
+          content: instructionManifest,
+        },
+      ],
+    };
+
+    const result = filterSkillSystemPrompt({
+      currentSystemPrompt: builder(options),
+      baseOptions: options,
+      filteredOptions: { ...options, skills: [kept, hidden] },
+    });
+
+    expect(result.recognizedSkillSection).toBe(true);
+    expect(result.systemPrompt).toContain(instructionManifest);
+    expect(result.systemPrompt.match(/blocked description/g)).toHaveLength(1);
+  });
+
+  it("preserves prompt changes wrapped around Pi's skill section", async () => {
     const builder = await loadCurrentPiBuilder();
     const currentSystemPrompt = `prefix\n${builder(baseOptions)}\nsuffix`;
 
-    const result = buildFilteredSystemPrompt({
+    const result = filterSkillSystemPrompt({
       currentSystemPrompt,
       baseOptions,
       filteredOptions,
     });
 
-    expect(result).toMatchObject({ preservedChainedChanges: true });
+    expect(result.recognizedSkillSection).toBe(true);
     expect(result.systemPrompt.startsWith("prefix\n")).toBe(true);
     expect(result.systemPrompt.endsWith("\nsuffix")).toBe(true);
-    expect(result.systemPrompt).not.toContain("PROJECT_CONTEXT");
+    expect(result.systemPrompt).not.toContain("blocked description");
   });
 
-  it("filters every duplicated resource section", async () => {
-    const builder = await loadCurrentPiBuilder();
-    const basePrompt = builder(baseOptions);
+  it("filters every duplicated generated skill section", () => {
+    const section = formatSkillsSection(baseOptions);
 
-    const result = buildFilteredSystemPrompt({
-      currentSystemPrompt: `${basePrompt}\n${basePrompt}`,
+    const result = filterSkillSystemPrompt({
+      currentSystemPrompt: `${section}\n${section}`,
       baseOptions,
       filteredOptions,
     });
 
-    expect(result.preservedChainedChanges).toBe(true);
-    expect(result.systemPrompt).not.toContain("PROJECT_CONTEXT");
+    expect(result.recognizedSkillSection).toBe(true);
+    expect(result.systemPrompt).not.toContain("blocked description");
+    expect(result.systemPrompt.match(/kept description/g)).toHaveLength(2);
   });
 
-  it("falls back to removing every identifiable resource entry", () => {
-    const entry =
-      '<project_instructions path="/repo/AGENTS.md">\nPROJECT_CONTEXT\n</project_instructions>\n\n';
-    const currentSystemPrompt = `custom wrapper\n${entry}${entry}custom suffix`;
+  it("falls back to removing identifiable blocked skill entries", () => {
+    const blockedSection = formatSkillsForPrompt([blocked]);
+    const blockedEntry = /<available_skills>\n([\s\S]+)\n<\/available_skills>/.exec(
+      blockedSection,
+    )?.[1];
+    const currentSystemPrompt = `custom wrapper\n<available_skills>\n<!-- upstream -->\n${blockedEntry}\n</available_skills>\ncustom suffix`;
 
+    const result = filterSkillSystemPrompt({
+      currentSystemPrompt,
+      baseOptions,
+      filteredOptions,
+    });
+
+    expect(result.recognizedSkillSection).toBe(true);
+    expect(result.systemPrompt).toContain("upstream");
+    expect(result.systemPrompt).not.toContain("blocked description");
+  });
+
+  it("recognizes an upstream replacement that already excludes blocked skills", () => {
     expect(
-      buildFilteredSystemPrompt({
-        currentSystemPrompt,
+      filterSkillSystemPrompt({
+        currentSystemPrompt: "replacement without project skills",
         baseOptions,
         filteredOptions,
       }),
     ).toEqual({
-      systemPrompt: "custom wrapper\ncustom suffix",
-      preservedChainedChanges: true,
+      systemPrompt: "replacement without project skills",
+      recognizedSkillSection: true,
     });
   });
 
-  it("recognizes when a replacement already excludes blocked resources", () => {
+  it("reports a transformed blocked skill that cannot be removed safely", () => {
+    const transformed = `${blocked.filePath}\ntransformed blocked description`;
+
     expect(
-      buildFilteredSystemPrompt({
-        currentSystemPrompt: "replacement without project resources",
+      filterSkillSystemPrompt({
+        currentSystemPrompt: transformed,
         baseOptions,
         filteredOptions,
       }),
     ).toEqual({
-      systemPrompt: "replacement without project resources",
-      preservedChainedChanges: true,
+      systemPrompt: transformed,
+      recognizedSkillSection: false,
     });
   });
 
-  it("reports when a transformed blocked resource cannot be removed safely", () => {
+  it("reports transformed blocked skills even when their path was removed", () => {
+    const transformed = `<skill>\n<name>${blocked.name}</name>\n<description>${blocked.description} (transformed)</description>\n</skill>`;
+
     expect(
-      buildFilteredSystemPrompt({
-        currentSystemPrompt: "transformed instructions from /repo/AGENTS.md",
+      filterSkillSystemPrompt({
+        currentSystemPrompt: transformed,
         baseOptions,
         filteredOptions,
       }),
     ).toEqual({
-      systemPrompt: "transformed instructions from /repo/AGENTS.md",
-      preservedChainedChanges: false,
+      systemPrompt: transformed,
+      recognizedSkillSection: false,
     });
   });
 
-  it("protects custom and appended XML while projecting resources", async () => {
+  it("protects exact custom and appended skill-like text", async () => {
     const builder = await loadCurrentPiBuilder();
-    const customPrompt =
-      'custom <project_context>\n<project_instructions path="/repo/AGENTS.md">CUSTOM_CONTEXT</project_instructions>\n</project_context>';
-    const appendSystemPrompt =
-      'append <project_context>\n<project_instructions path="/repo/AGENTS.md">APPEND_CONTEXT</project_instructions>\n</project_context>';
+    const protectedText = formatSkillsForPrompt([blocked]);
     const options = {
       ...baseOptions,
-      customPrompt,
-      appendSystemPrompt,
+      customPrompt: protectedText,
+      appendSystemPrompt: protectedText,
     };
 
-    const result = projectSystemPromptResources({
+    const result = filterSkillSystemPrompt({
       currentSystemPrompt: builder(options),
       baseOptions: options,
-      filteredOptions: { ...options, contextFiles: [] },
+      filteredOptions: { ...options, skills: [kept, hidden] },
     });
 
-    expect(result.recognizedResourceSections).toBe(true);
-    expect(result.systemPrompt).toContain("CUSTOM_CONTEXT");
-    expect(result.systemPrompt).toContain("APPEND_CONTEXT");
-    expect(result.systemPrompt).not.toContain("PROJECT_CONTEXT");
+    expect(result.recognizedSkillSection).toBe(true);
+    expect(result.systemPrompt.match(/blocked description/g)).toHaveLength(2);
   });
 
-  it("projects newly allowed resources into an already-filtered prompt", () => {
-    const previousOptions: BuildSystemPromptOptions = {
-      cwd: "/repo",
-      contextFiles: [
-        { path: "/repo/previous.md", content: "PREVIOUS_CONTEXT" },
-      ],
-      skills: [],
-    };
-    const nextOptions: BuildSystemPromptOptions = {
-      cwd: "/repo",
-      contextFiles: [{ path: "/repo/next.md", content: "NEXT_CONTEXT" }],
-      skills: [],
-    };
-    const currentSystemPrompt = `base\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/previous.md">\nPREVIOUS_CONTEXT\n</project_instructions>\n\n</project_context>\n`;
-
-    const result = projectSystemPromptResources({
-      currentSystemPrompt,
-      baseOptions: {
-        ...previousOptions,
-        contextFiles: [
-          ...(previousOptions.contextFiles ?? []),
-          ...(nextOptions.contextFiles ?? []),
-        ],
-      },
-      filteredOptions: nextOptions,
-    });
-
-    expect(result.recognizedResourceSections).toBe(true);
-    expect(result.systemPrompt).toContain("NEXT_CONTEXT");
-    expect(result.systemPrompt).not.toContain("PREVIOUS_CONTEXT");
-  });
-
-  it("uses Pi's public skill formatter when filtering skills", async () => {
+  it("preserves upstream skill annotations while removing blocked skills", async () => {
     const builder = await loadCurrentPiBuilder();
-    const kept = skill("kept");
-    const removed = skill("removed");
-    const options = {
-      ...baseOptions,
-      contextFiles: [],
-      skills: [kept, removed],
-    };
-    const currentSystemPrompt = builder(options);
+    const currentSystemPrompt = builder(baseOptions).replace(
+      "<available_skills>",
+      "<available_skills>\n  <!-- upstream annotation -->",
+    );
 
-    const result = buildFilteredSystemPrompt({
+    const result = filterSkillSystemPrompt({
       currentSystemPrompt,
-      baseOptions: options,
-      filteredOptions: { ...options, skills: [kept] },
+      baseOptions,
+      filteredOptions,
     });
 
-    expect(result.preservedChainedChanges).toBe(true);
+    expect(result.recognizedSkillSection).toBe(true);
+    expect(result.systemPrompt).toContain("upstream annotation");
     expect(result.systemPrompt).toContain("kept description");
-    expect(result.systemPrompt).not.toContain("removed description");
+    expect(result.systemPrompt).not.toContain("blocked description");
   });
 });

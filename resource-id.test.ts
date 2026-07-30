@@ -17,9 +17,7 @@ async function temporaryDirectory(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(
-    temporaryRoots
-      .splice(0)
-      .map((path) => rm(path, { recursive: true, force: true })),
+    temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
 
@@ -38,10 +36,26 @@ describe("resource ids", () => {
       gitCommonDir: "/shared/.git",
     };
 
-    await expect(
-      createResourceRef(skillPath, repository),
-    ).resolves.toMatchObject({
+    await expect(createResourceRef(skillPath, repository)).resolves.toMatchObject({
       id: "repo:.agents/skills/demo/SKILL.md",
+    });
+  });
+
+  it("accepts repository directories whose names begin with two dots", async () => {
+    const root = await temporaryDirectory();
+    const contextPath = join(root, "..internal", "AGENTS.md");
+    await mkdir(join(root, "..internal"), { recursive: true });
+    await writeFile(contextPath, "demo");
+    const repository: RepositoryIdentity = {
+      id: "git:/shared/.git",
+      label: root,
+      configKey: "abc123",
+      worktreeRoot: root,
+      gitCommonDir: "/shared/.git",
+    };
+
+    await expect(createResourceRef(contextPath, repository)).resolves.toMatchObject({
+      id: "repo:..internal/AGENTS.md",
     });
   });
 
@@ -61,9 +75,7 @@ describe("resource ids", () => {
 
     const canonicalAgentsPath = await realpath(agentsPath);
 
-    await expect(
-      createResourceRef(agentsPath, repository),
-    ).resolves.toMatchObject({
+    await expect(createResourceRef(agentsPath, repository)).resolves.toMatchObject({
       id: `abs:${canonicalAgentsPath}`,
     });
   });

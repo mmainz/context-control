@@ -1,7 +1,7 @@
 {
   "name": "context-control",
   "version": "0.1.0",
-  "description": "Pi extension for selecting which AGENTS.md files and skills are active per repository.",
+  "description": "Pi extension for controlling automatic project-skill awareness per repository.",
   "keywords": [
     "agents",
     "context-control",
@@ -36,9 +36,11 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:integration": "vitest run pi.integration.test.ts",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@earendil-works/pi-tui": "0.80.10",
     "@eslint/js": "^9.39.1",

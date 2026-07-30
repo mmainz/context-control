@@ -1,25 +1,22 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { analyzeContextUsage } from "./context-usage";
 import { showContextUsage } from "./context-usage-ui";
-import { selectEffectiveContext } from "./effective-context";
+import { selectEffectiveSkills } from "./effective-context";
 import { countEnabled, staleRefs } from "./filtering";
-import { discoverContextFiles, discoverSkills } from "./resources";
+import { discoverSkills } from "./resources";
 import { createRuntimeConfigLoader } from "./runtime";
-import { buildFilteredSystemPrompt } from "./system-prompt";
+import { filterSkillSystemPrompt, formatSkillsSection } from "./system-prompt";
 import { runContextControlCommand } from "./ui";
 import type { RuntimeConfig } from "./types";
 
 const EXTENSION_NAME = "context-control";
 
-function shouldRebuildPrompt(runtime: RuntimeConfig): boolean {
-  return (
-    runtime.config.contextFiles.mode !== "all" ||
-    runtime.config.skills.mode !== "all"
-  );
+function shouldFilterSkills(
+  rawOptions: Parameters<typeof formatSkillsSection>[0],
+  filteredOptions: Parameters<typeof formatSkillsSection>[0],
+): boolean {
+  return formatSkillsSection(rawOptions) !== formatSkillsSection(filteredOptions);
 }
 
 function setStatus(ctx: ExtensionContext, text: string | undefined): void {
@@ -32,32 +29,20 @@ async function publishStartupSummary(
   runtime: RuntimeConfig,
   isCancelled: () => boolean,
 ): Promise<void> {
-  const [contextFileItems, skillItems] = await Promise.all([
-    discoverContextFiles(ctx, runtime.repository),
-    discoverSkills(pi, runtime.repository),
-  ]);
+  const skillItems = await discoverSkills(pi, runtime.repository);
   if (isCancelled()) return;
 
-  const enabledContextFiles = countEnabled(
-    contextFileItems,
-    runtime.config.contextFiles,
-  );
   const enabledSkills = countEnabled(skillItems, runtime.config.skills);
-  const staleCount =
-    staleRefs(contextFileItems, runtime.config.contextFiles).length +
-    staleRefs(skillItems, runtime.config.skills).length;
+  const staleCount = staleRefs(skillItems, runtime.config.skills).length;
   const staleSuffix = staleCount > 0 ? `, ${staleCount} stale` : "";
-  const status = `${enabledContextFiles}/${contextFileItems.length} project context, ${enabledSkills}/${skillItems.length} project skills${staleSuffix}`;
+  const status = `${enabledSkills}/${skillItems.length} project skills${staleSuffix}`;
 
   setStatus(ctx, status);
   const header =
     ctx.mode === "tui"
       ? ctx.ui.theme.fg("accent", ctx.ui.theme.bold("[Context Control]"))
       : "[Context Control]";
-  ctx.ui.notify(
-    `${header} ${status} enabled. Run /context-control for details.`,
-    "info",
-  );
+  ctx.ui.notify(`${header} ${status} enabled. Run /context-control for details.`, "info");
 }
 
 export default function contextControl(pi: ExtensionAPI) {
@@ -73,8 +58,7 @@ export default function contextControl(pi: ExtensionAPI) {
   }
 
   pi.registerCommand(EXTENSION_NAME, {
-    description:
-      "Configure project context or inspect effective context-window usage.",
+    description: "Configure project skills or inspect effective context-window usage.",
     getArgumentCompletions: (prefix) => {
       const choices = [
         {
@@ -88,9 +72,7 @@ export default function contextControl(pi: ExtensionAPI) {
           description: "Show the full effective context breakdown.",
         },
       ];
-      const matches = choices.filter((choice) =>
-        choice.value.startsWith(prefix.trimStart()),
-      );
+      const matches = choices.filter((choice) => choice.value.startsWith(prefix.trimStart()));
       return matches.length > 0 ? matches : null;
     },
     handler: async (args, ctx) => {
@@ -119,8 +101,8 @@ export default function contextControl(pi: ExtensionAPI) {
 
       cancelStartupSummary();
       await ctx.waitForIdle();
-      const options = ctx.getSystemPromptOptions();
       const runtime = await runtimeLoader.load(ctx.cwd);
+      const options = ctx.getSystemPromptOptions();
       const openUsage = async (full: boolean): Promise<void> => {
         const currentRuntime = await runtimeLoader.load(ctx.cwd);
         const analysis = await analyzeContextUsage({
@@ -145,33 +127,26 @@ export default function contextControl(pi: ExtensionAPI) {
     cancelStartupSummary();
     const runtime = await runtimeLoader.load(ctx.cwd);
     const text =
-      runtime.config.contextFiles.mode === "all" &&
       runtime.config.skills.mode === "all"
-        ? "all project context"
-        : `project context: ${runtime.config.contextFiles.mode}, project skills: ${runtime.config.skills.mode}`;
+        ? "all project skills"
+        : `project skills: ${runtime.config.skills.mode}`;
     setStatus(ctx, text);
 
-    if (
-      ctx.hasUI &&
-      (event.reason === "startup" || event.reason === "reload")
-    ) {
+    if (ctx.hasUI && (event.reason === "startup" || event.reason === "reload")) {
       const generation = startupSummaryGeneration;
       const isCancelled = () => generation !== startupSummaryGeneration;
       startupSummaryTimer = setTimeout(() => {
         startupSummaryTimer = undefined;
         if (isCancelled()) return;
 
-        void publishStartupSummary(pi, ctx, runtime, isCancelled).catch(
-          (error: unknown) => {
-            if (isCancelled()) return;
-            const message =
-              error instanceof Error ? error.message : String(error);
-            ctx.ui.notify(
-              `context-control: failed to summarize resources: ${message}`,
-              "warning",
-            );
-          },
-        );
+        void publishStartupSummary(pi, ctx, runtime, isCancelled).catch((error: unknown) => {
+          if (isCancelled()) return;
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(
+            `context-control: failed to summarize project skills: ${message}`,
+            "warning",
+          );
+        });
       }, 0);
     }
   });
@@ -179,42 +154,26 @@ export default function contextControl(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     cancelStartupSummary();
     const runtime = await runtimeLoader.load(ctx.cwd);
-
-    const selection = await selectEffectiveContext(
-      event.systemPromptOptions,
-      runtime,
-    );
-    const projectContextFileItems = selection.contextFiles.project;
-    const projectSkillItems = selection.skills.project;
-    const enabledContextFiles =
-      projectContextFileItems.length - selection.contextFiles.blocked.length;
-    const enabledSkills =
-      projectSkillItems.length - selection.skills.blocked.length;
-    const staleCount =
-      staleRefs(projectContextFileItems, runtime.config.contextFiles).length +
-      staleRefs(projectSkillItems, runtime.config.skills).length;
+    const selection = await selectEffectiveSkills(event.systemPromptOptions, runtime);
+    const enabledSkills = selection.project.length - selection.blocked.length;
+    const staleCount = staleRefs(selection.project, runtime.config.skills).length;
     const staleSuffix = staleCount > 0 ? `, ${staleCount} stale` : "";
-    setStatus(
-      ctx,
-      `${enabledContextFiles}/${projectContextFileItems.length} project context, ${enabledSkills}/${projectSkillItems.length} project skills${staleSuffix}`,
-    );
+    setStatus(ctx, `${enabledSkills}/${selection.project.length} project skills${staleSuffix}`);
 
-    if (!shouldRebuildPrompt(runtime)) return undefined;
+    if (!shouldFilterSkills(event.systemPromptOptions, selection.effectiveOptions)) {
+      return undefined;
+    }
 
-    const result = buildFilteredSystemPrompt({
+    const result = filterSkillSystemPrompt({
       currentSystemPrompt: event.systemPrompt,
       baseOptions: event.systemPromptOptions,
-      filteredOptions: selection.filteredOptions,
+      filteredOptions: selection.effectiveOptions,
     });
 
-    if (
-      !result.preservedChainedChanges &&
-      !warnedAboutPromptReplacement &&
-      ctx.hasUI
-    ) {
+    if (!result.recognizedSkillSection && !warnedAboutPromptReplacement && ctx.hasUI) {
       warnedAboutPromptReplacement = true;
       ctx.ui.notify(
-        "context-control: an earlier extension changed Pi's resource sections, so resource filtering may be incomplete for this turn.",
+        "context-control: an earlier extension changed Pi's skill section, so skill filtering may be incomplete for this turn.",
         "warning",
       );
     }
