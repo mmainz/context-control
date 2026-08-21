@@ -66,7 +66,7 @@ Repository settings are stored outside the shared repository under:
 
 For Git repositories, the config key is based on `git rev-parse --path-format=absolute --git-common-dir`, so linked worktrees for the same clone share one context-control configuration.
 
-Skill identities are path-based. Project skills inside the current worktree use `repo:<relative-path>` ids, which makes the same config usable across linked worktrees. Skills absent from the current worktree remain as stale references until explicitly cleaned.
+Skill identities are path-based. Project skills inside the current worktree use `repo:<relative-path>` ids, which makes the same config usable across linked worktrees. Symlinked skills use the link location for repository ownership, so a project can control links whose targets live outside the worktree. Skills absent from the current worktree remain as stale references until explicitly cleaned.
 
 Repository identity is cached for the current Pi session, while the configuration file is reread before commands and agent turns. External edits are therefore observed between operations; edits made while the interactive configuration flow is already open are not merged into that in-progress transaction.
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
@@ -87,10 +87,10 @@ async function writeSkill(skillRoot: string, name: string, marker: string): Prom
   return path;
 }
 
-async function writeBlockedSkillConfig(
+async function writeSkillConfig(
   agentDir: string,
   projectDir: string,
-  blockedSkillPath: string,
+  skills: unknown,
 ): Promise<void> {
   const canonicalProject = await realpath(projectDir);
   const repositoryId = `path:${canonicalProject}`;
@@ -106,23 +106,31 @@ async function writeBlockedSkillConfig(
           id: repositoryId,
           label: canonicalProject,
         },
-        skills: {
-          mode: "blocklist",
-          refs: [
-            {
-              id: "repo:.pi/skills/blocked/SKILL.md",
-              path: blockedSkillPath,
-              label: "blocked",
-              group: "temporary",
-            },
-          ],
-        },
+        skills,
       },
       null,
       2,
     )}\n`,
     "utf8",
   );
+}
+
+async function writeBlockedSkillConfig(
+  agentDir: string,
+  projectDir: string,
+  blockedSkillPath: string,
+): Promise<void> {
+  await writeSkillConfig(agentDir, projectDir, {
+    mode: "blocklist",
+    refs: [
+      {
+        id: "repo:.pi/skills/blocked/SKILL.md",
+        path: blockedSkillPath,
+        label: "blocked",
+        group: "temporary",
+      },
+    ],
+  });
 }
 
 describe("Pi CLI integration", () => {
@@ -144,6 +152,66 @@ describe("Pi CLI integration", () => {
         ]);
 
         expectSuccessfulPiRun(result);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+    piTimeoutMs + 5_000,
+  );
+
+  it(
+    "treats a repository skill symlink as project-owned",
+    async () => {
+      const temporaryRoot = await mkdtemp(join(tmpdir(), "context-control-symlink-policy-"));
+      const projectDir = join(temporaryRoot, "project");
+      const agentDir = join(temporaryRoot, "agent");
+      const targetRoot = join(temporaryRoot, "shared", "linked-skill");
+      const skillRoot = join(projectDir, ".agents", "skills");
+      const linkedSkillRoot = join(skillRoot, "linked-skill");
+      const resultPath = join(temporaryRoot, "probe-result.json");
+      const marker = "LINKED_SKILL_INTEGRATION_MARKER";
+      await mkdir(projectDir, { recursive: true });
+
+      try {
+        await writeSkill(join(temporaryRoot, "shared"), "linked-skill", marker);
+        await mkdir(skillRoot, { recursive: true });
+        await symlink(targetRoot, linkedSkillRoot);
+        await writeSkillConfig(agentDir, projectDir, { mode: "none" });
+
+        const result = runPi(
+          projectDir,
+          agentDir,
+          [
+            ...commonArguments(),
+            "--extension",
+            repositoryRoot,
+            "--extension",
+            probeProvider,
+            "--skill",
+            linkedSkillRoot,
+            "--provider",
+            "context-control-probe",
+            "--model",
+            "probe-model",
+            "--print",
+            "run context-control symlink integration probe",
+          ],
+          {
+            CONTEXT_CONTROL_PROBE_RESULT: resultPath,
+            CONTEXT_CONTROL_ALLOWED_MARKER: "UNUSED_ALLOWED_SKILL_MARKER",
+            CONTEXT_CONTROL_BLOCKED_MARKER: marker,
+          },
+        );
+
+        expectSuccessfulPiRun(result);
+        expect(result.stdout).toContain("probe-ok");
+
+        const report = JSON.parse(await readFile(resultPath, "utf8")) as {
+          blockedVisible: boolean;
+          commandNames: string[];
+        };
+        expect(report.blockedVisible).toBe(false);
+        expect(report.commandNames).toContain("skill:linked-skill");
       } finally {
         await rm(temporaryRoot, { recursive: true, force: true });
       }

@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 
 import type { RepositoryIdentity, ResourceRef } from "./types";
 
@@ -12,13 +12,26 @@ async function canonicalize(path: string): Promise<string> {
   }
 }
 
-function isInside(parent: string, child: string): boolean {
-  const rel = relative(parent, child);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-}
-
 function toPortablePath(path: string): string {
   return path.split(sep).join("/");
+}
+
+async function locationInsideWorktree(
+  path: string,
+  worktreeRoot: string,
+): Promise<string | undefined> {
+  let ancestor = dirname(path);
+
+  while (true) {
+    const canonicalAncestor = await canonicalize(ancestor);
+    if (canonicalAncestor === worktreeRoot) {
+      return resolve(canonicalAncestor, relative(ancestor, path));
+    }
+
+    const parent = dirname(ancestor);
+    if (parent === ancestor) return undefined;
+    ancestor = parent;
+  }
 }
 
 export async function createResourceRef(
@@ -26,14 +39,18 @@ export async function createResourceRef(
   repository: RepositoryIdentity,
   options: { label?: string; group?: string } = {},
 ): Promise<ResourceRef> {
-  const absolutePath = await canonicalize(path);
+  const resolvedPath = resolve(path);
   const worktreeRoot = repository.worktreeRoot
     ? await canonicalize(repository.worktreeRoot)
     : undefined;
+  const worktreeLocation = worktreeRoot
+    ? await locationInsideWorktree(resolvedPath, worktreeRoot)
+    : undefined;
+  const absolutePath = worktreeLocation ?? (await canonicalize(path));
 
   const id =
-    worktreeRoot && isInside(worktreeRoot, absolutePath)
-      ? `repo:${toPortablePath(relative(worktreeRoot, absolutePath))}`
+    worktreeRoot && worktreeLocation
+      ? `repo:${toPortablePath(relative(worktreeRoot, worktreeLocation))}`
       : `abs:${absolutePath}`;
 
   return {
