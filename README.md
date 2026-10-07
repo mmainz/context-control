@@ -25,7 +25,7 @@ The command opens a guided flow for project skills in Pi's interactive TUI:
 
 Pi exclusively discovers and loads `AGENTS.md` and `CLAUDE.md` instruction files. Context-control does not discover, inject, filter, or configure them. Global/user skills are also outside repository policy and always remain available to the model.
 
-On startup and `/reload`, context-control adds a concise notification and status with effective project-skill counts. Run `/context-control` for the detailed policy, enabled and ignored skills, and stale entries. The command reads Pi's current system-prompt options, so its inventory matches skills loaded from packages, settings, CLI options, and the active project.
+On startup and `/reload`, context-control adds a concise notification and status with effective project-skill counts. Run `/context-control` for the current policy and counts of enabled skills, ignored skills, and stale entries. The main screen does not list individual skills, keeping it compact in fullscreen mode even in repositories with large skill inventories. Browse individual skills through **Configure project skills… → Block selected… / Allow selected…**, or inspect them with `/context-control usage full`. The command reads Pi's current system-prompt options, so its inventory matches skills loaded from packages, settings, CLI options, and the active project.
 
 The extension filters automatic model awareness only. Disabled project skills are removed from the system prompt, but explicit `/skill:name` commands still work when Pi's skill commands are enabled. Skills with `disable-model-invocation: true` are already explicit-only in Pi, so context-control excludes them from policy counts while preserving any registered `/skill:name` invocation.
 
