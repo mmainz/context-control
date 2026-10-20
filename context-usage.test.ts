@@ -212,8 +212,27 @@ describe("context usage analysis", () => {
     expect(analysis.systemPrompt.skills).toBeGreaterThan(0);
   });
 
-  it("reports enabled skills as non-visible when read is inactive", async () => {
+  it("reports enabled skills as visible when only bash can read files", async () => {
     const { ctx, options, pi } = harness(["bash"]);
+    const analysis = await analyzeContextUsage({
+      pi,
+      ctx,
+      runtime: runtime(),
+      options,
+      compactionReserveTokens: 0,
+    });
+
+    for (const label of ["allowed", "user-skill"]) {
+      const resource = analysis.resources.find((item) => item.label === label);
+      expect(resource?.visibility).toBe("model-visible");
+      expect(resource?.tokens).toBeGreaterThan(0);
+    }
+    expect(analysis.systemPrompt.skills).toBeGreaterThan(0);
+    expect(analysis.policyImpact.skills.saved).toBeGreaterThan(0);
+  });
+
+  it("reports enabled skills as non-visible when no file reader is active", async () => {
+    const { ctx, options, pi } = harness(["edit", "write"]);
     const analysis = await analyzeContextUsage({
       pi,
       ctx,

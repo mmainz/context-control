@@ -172,7 +172,7 @@ export function formatContextUsageLines(analysis: ContextUsageAnalysis, full: bo
     `  Model-visible skills: ${visibleSkills.length}`,
     `  Blocked by skill policy: ${blocked.length}`,
     `  Explicit-only skills: ${explicitOnly.length}`,
-    `  Skills hidden because read is inactive: ${readDisabled.length}`,
+    `  Skills hidden because no file reader is active: ${readDisabled.length}`,
     "  Slash commands are shown separately from automatic model visibility.",
     "",
     "[Skill Policy Impact]",
@@ -230,7 +230,7 @@ export function formatContextUsageLines(analysis: ContextUsageAnalysis, full: bo
   pushResourceSection(lines, "Model-visible Skills", visibleSkills);
   pushResourceSection(lines, "Blocked Resources", blocked);
   pushResourceSection(lines, "Explicit-only Skills", explicitOnly);
-  pushResourceSection(lines, "Read-disabled Skills", readDisabled);
+  pushResourceSection(lines, "Reader-disabled Skills", readDisabled);
 
   lines.push("[Active Tool Definitions]");
   if (analysis.tools.length === 0) {

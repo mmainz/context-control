@@ -21,7 +21,7 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
-function writeProbeResult(pi: ExtensionAPI, systemPrompt: string): void {
+function writeProbeResult(pi: ExtensionAPI, modelContext: string): void {
   const resultPath = requiredEnvironment("CONTEXT_CONTROL_PROBE_RESULT");
   const allowedMarker = requiredEnvironment("CONTEXT_CONTROL_ALLOWED_MARKER");
   const blockedMarker = requiredEnvironment("CONTEXT_CONTROL_BLOCKED_MARKER");
@@ -31,8 +31,10 @@ function writeProbeResult(pi: ExtensionAPI, systemPrompt: string): void {
     resultPath,
     `${JSON.stringify(
       {
-        allowedVisible: systemPrompt.includes(allowedMarker),
-        blockedVisible: systemPrompt.includes(blockedMarker),
+        allowedVisible: modelContext.includes(allowedMarker),
+        blockedVisible: modelContext.includes(blockedMarker),
+        blockedNameVisible: modelContext.includes("<name>blocked</name>"),
+        blockedPathVisible: modelContext.includes("/blocked/SKILL.md"),
         allowedCommandRegistered: commandNames.includes("skill:allowed"),
         blockedCommandRegistered: commandNames.includes("skill:blocked"),
         commandNames,
@@ -112,7 +114,8 @@ export default function probeProvider(pi: ExtensionAPI): void {
       },
     ],
     streamSimple: (model, context) => {
-      writeProbeResult(pi, context.systemPrompt ?? "");
+      // Covers both legacy systemPrompt and transcript-based system messages in newer Pi.
+      writeProbeResult(pi, JSON.stringify(context));
       return createProbeStream(model);
     },
   });

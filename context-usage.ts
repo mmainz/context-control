@@ -374,15 +374,16 @@ export async function analyzeContextUsage(input: {
     );
   }
 
-  const readEnabled = options.selectedTools === undefined || options.selectedTools.includes("read");
+  const tools = options.selectedTools;
+  const fileReaderEnabled = tools === undefined || tools.includes("read") || tools.includes("bash");
   for (const item of selection.enabled) {
     const skill = skillByPath.get(item.sourcePath);
     resources.push(
       itemUsage({
         item,
         kind: "skill",
-        visibility: readEnabled ? "model-visible" : "read-tool-disabled",
-        tokens: readEnabled ? skillTokens(skill) : 0,
+        visibility: fileReaderEnabled ? "model-visible" : "read-tool-disabled",
+        tokens: fileReaderEnabled ? skillTokens(skill) : 0,
         slashCommands: slashCommands.get(item.sourcePath) ?? [],
       }),
     );

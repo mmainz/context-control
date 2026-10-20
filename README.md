@@ -2,7 +2,7 @@
 
 A Pi extension for controlling which project skills are included in automatic model context for each repository.
 
-Tested with `@earendil-works/pi-coding-agent` 0.80.10. Requires Node.js 22.19 or newer.
+Skill filtering is tested with `@earendil-works/pi-coding-agent` 0.80.10 and 1.3.0. Requires Node.js 22.19 or newer.
 
 ## Usage
 
@@ -46,7 +46,7 @@ The report analyzes the effective prompt after applying the repository's skill p
 - Estimated tokens and context-window percentage saved by blocked project skills
 - Pi-reported usage and an independently estimated snapshot
 - System-prompt composition
-- Model-visible, blocked, explicit-only, and read-disabled skills
+- Model-visible, blocked, explicit-only, and reader-disabled skills
 - Guidelines and tool snippets
 - Active tool-definition estimates
 - The compaction-aware conversation breakdown
@@ -74,6 +74,8 @@ Legacy version-1 configuration files are read safely: their skill policy is migr
 
 ## Compatibility notes
 
+Skill filtering remains active when `bash` is available without the `read` tool, including bash-only sessions in Pi 1.3.0.
+
 Context-control rewrites only Pi's generated skill section and leaves Pi-managed instruction sections untouched. It preserves earlier `before_agent_start` changes around the skill section. If another extension transforms blocked skill entries so they cannot be identified safely, context-control removes recognizable entries and emits one warning when filtering may be incomplete.
 
 The runtime uses Pi's public structured prompt options and skill formatter. The compatibility test suite compares skill filtering against the current Pi prompt builder; the shipped extension does not import Pi's private internals.
@@ -97,6 +99,14 @@ Run only the real-Pi integration tests:
 ```bash
 bun run test:integration
 ```
+
+By default, integration tests use the repository's pinned Pi dependency. To test the installed Pi CLI instead:
+
+```bash
+CONTEXT_CONTROL_PI_CLI="$(command -v pi)" bun run test:integration
+```
+
+The probe checks the full provider context, including transcript system messages in newer Pi versions. Policy tests compare default-tool and bash-only sessions against a control run without context-control.
 
 Try the extension locally:
 

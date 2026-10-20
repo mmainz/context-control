@@ -7,14 +7,9 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = import.meta.dirname;
-const piCli = join(
-  repositoryRoot,
-  "node_modules",
-  "@earendil-works",
-  "pi-coding-agent",
-  "dist",
-  "cli.js",
-);
+const piCli =
+  process.env.CONTEXT_CONTROL_PI_CLI ??
+  join(repositoryRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
 const probeProvider = join(repositoryRoot, "integration-fixtures", "probe-provider.ts");
 const piTimeoutMs = 30_000;
 
@@ -115,24 +110,6 @@ async function writeSkillConfig(
   );
 }
 
-async function writeBlockedSkillConfig(
-  agentDir: string,
-  projectDir: string,
-  blockedSkillPath: string,
-): Promise<void> {
-  await writeSkillConfig(agentDir, projectDir, {
-    mode: "blocklist",
-    refs: [
-      {
-        id: "repo:.pi/skills/blocked/SKILL.md",
-        path: blockedSkillPath,
-        label: "blocked",
-        group: "temporary",
-      },
-    ],
-  });
-}
-
 describe("Pi CLI integration", () => {
   it(
     "starts a real Pi session with the extension",
@@ -219,9 +196,14 @@ describe("Pi CLI integration", () => {
     piTimeoutMs + 5_000,
   );
 
-  it(
-    "omits a blocked skill from model context but keeps its command registered",
-    async () => {
+  it.each(
+    (["blocklist", "allowlist", "none"] as const).flatMap((mode) => [
+      { mode, tools: "read,bash,edit,write" },
+      { mode, tools: "bash" },
+    ]),
+  )(
+    "applies $mode policy to provider context with tools=$tools while keeping skill commands",
+    async ({ mode, tools }) => {
       const temporaryRoot = await mkdtemp(join(tmpdir(), "context-control-policy-"));
       const projectDir = join(temporaryRoot, "project");
       const agentDir = join(temporaryRoot, "agent");
@@ -232,48 +214,78 @@ describe("Pi CLI integration", () => {
       await mkdir(projectDir, { recursive: true });
 
       try {
-        await writeSkill(skillRoot, "allowed", allowedMarker);
+        const allowedSkillPath = await writeSkill(skillRoot, "allowed", allowedMarker);
         const blockedSkillPath = await writeSkill(skillRoot, "blocked", blockedMarker);
-        await writeBlockedSkillConfig(agentDir, projectDir, blockedSkillPath);
+        const selected = mode === "allowlist" ? "allowed" : "blocked";
+        await writeSkillConfig(agentDir, projectDir, {
+          mode,
+          ...(mode === "none"
+            ? {}
+            : {
+                refs: [
+                  {
+                    id: `repo:.pi/skills/${selected}/SKILL.md`,
+                    path: selected === "allowed" ? allowedSkillPath : blockedSkillPath,
+                    label: selected,
+                    group: "temporary",
+                  },
+                ],
+              }),
+        });
+
+        const args = [
+          ...commonArguments(),
+          "--tools",
+          tools,
+          "--extension",
+          probeProvider,
+          "--skill",
+          skillRoot,
+          "--provider",
+          "context-control-probe",
+          "--model",
+          "probe-model",
+          "--print",
+          "run context-control integration probe",
+        ];
+        const environment = {
+          CONTEXT_CONTROL_PROBE_RESULT: resultPath,
+          CONTEXT_CONTROL_ALLOWED_MARKER: allowedMarker,
+          CONTEXT_CONTROL_BLOCKED_MARKER: blockedMarker,
+        };
+        const control = runPi(projectDir, agentDir, args, environment);
+        expectSuccessfulPiRun(control);
+        const controlReport = JSON.parse(await readFile(resultPath, "utf8")) as {
+          allowedVisible: boolean;
+          blockedVisible: boolean;
+        };
+        // Older Pi omits all skills with bash alone; newer Pi advertises both readers.
+        expect(controlReport.blockedVisible).toBe(controlReport.allowedVisible);
+        if (tools.includes("read")) expect(controlReport.allowedVisible).toBe(true);
+        await rm(resultPath);
 
         const result = runPi(
           projectDir,
           agentDir,
-          [
-            ...commonArguments(),
-            "--extension",
-            repositoryRoot,
-            "--extension",
-            probeProvider,
-            "--skill",
-            skillRoot,
-            "--provider",
-            "context-control-probe",
-            "--model",
-            "probe-model",
-            "--print",
-            "run context-control integration probe",
-          ],
-          {
-            CONTEXT_CONTROL_PROBE_RESULT: resultPath,
-            CONTEXT_CONTROL_ALLOWED_MARKER: allowedMarker,
-            CONTEXT_CONTROL_BLOCKED_MARKER: blockedMarker,
-          },
+          ["--extension", repositoryRoot, ...args],
+          environment,
         );
-
         expectSuccessfulPiRun(result);
         expect(result.stdout).toContain("probe-ok");
 
         const report = JSON.parse(await readFile(resultPath, "utf8")) as {
           allowedVisible: boolean;
           blockedVisible: boolean;
+          blockedNameVisible: boolean;
+          blockedPathVisible: boolean;
           allowedCommandRegistered: boolean;
           blockedCommandRegistered: boolean;
-          commandNames: string[];
         };
         expect(report).toMatchObject({
-          allowedVisible: true,
+          allowedVisible: mode !== "none" && controlReport.allowedVisible,
           blockedVisible: false,
+          blockedNameVisible: false,
+          blockedPathVisible: false,
           allowedCommandRegistered: true,
           blockedCommandRegistered: true,
         });

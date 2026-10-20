@@ -51,6 +51,36 @@ const filteredOptions: BuildSystemPromptOptions = {
 };
 
 describe("skill prompt filtering", () => {
+  it.each([
+    { selectedTools: undefined, visible: true },
+    { selectedTools: ["read"], visible: true },
+    { selectedTools: ["bash"], visible: true },
+    { selectedTools: ["read", "bash"], visible: true },
+    { selectedTools: ["edit", "write"], visible: false },
+    { selectedTools: [], visible: false },
+  ])("detects skill awareness for $selectedTools", ({ selectedTools, visible }) => {
+    const options = {
+      ...baseOptions,
+      ...(selectedTools === undefined ? {} : { selectedTools }),
+    };
+
+    expect(formatSkillsSection(options).includes("blocked description")).toBe(visible);
+  });
+
+  it("removes blocked skill entries when only bash can read files", () => {
+    const options = { ...baseOptions, selectedTools: ["bash"] };
+    const result = filterSkillSystemPrompt({
+      currentSystemPrompt: formatSkillsForPrompt(options.skills ?? []),
+      baseOptions: options,
+      filteredOptions: { ...options, skills: [kept, hidden] },
+    });
+
+    expect(result.recognizedSkillSection).toBe(true);
+    expect(result.systemPrompt).toContain("kept description");
+    expect(result.systemPrompt).not.toContain("blocked description");
+    expect(result.systemPrompt).not.toContain(blocked.filePath);
+  });
+
   it("leaves the prompt unchanged when the skill manifest is unchanged", () => {
     expect(
       filterSkillSystemPrompt({

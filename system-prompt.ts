@@ -10,8 +10,9 @@ export interface SkillFilteredSystemPromptResult {
 }
 
 export function formatSkillsSection(options: BuildSystemPromptOptions): string {
-  const hasReadTool = options.selectedTools === undefined || options.selectedTools.includes("read");
-  if (!hasReadTool) return "";
+  const tools = options.selectedTools;
+  const hasFileReader = tools === undefined || tools.includes("read") || tools.includes("bash");
+  if (!hasFileReader) return "";
 
   return formatSkillsForPrompt(options.skills ?? []);
 }
